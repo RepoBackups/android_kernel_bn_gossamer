@@ -760,17 +760,6 @@ void omap2_clk_prepare_for_reboot(void)
 	clk_set_rate(vclk, rate);
 #endif
 
-	/*
-	 * PRCM on OMAP3 will drive SYS_OFFMODE low during DPLL3 warm reset.
-	 * This causes Gaia sleep script to execute, usually killing VDD1 and
-	 * VDD2 while code is running.  WA is to disable the sleep script
-	 * before warm reset.
-	 */
-#ifdef CONFIG_TWL4030_POWER
-	err = twl4030_remove_script(TRITON_SLEEP_SCRIPT);
-	if (err)
-		pr_err("twl4030: error trying to disable sleep script!\n");
-#endif
 }
 
 void omap3_lock_dpll5(void)

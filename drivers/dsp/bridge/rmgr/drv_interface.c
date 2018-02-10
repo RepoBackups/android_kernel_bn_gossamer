@@ -150,7 +150,7 @@ module_param(base_img, charp, 0);
 MODULE_PARM_DESC(base_img, "DSP base image, default = NULL");
 
 module_param(shm_size, int, 0);
-MODULE_PARM_DESC(shm_size, "SHM size, default = 4 MB, minimum = 64 KB");
+MODULE_PARM_DESC(shm_size, "SHM size, default = 5 MB, minimum = 64 KB");
 
 module_param(phys_mempool_base, uint, 0);
 MODULE_PARM_DESC(phys_mempool_base,
@@ -312,10 +312,8 @@ static int __devinit omap34xx_bridge_probe(struct platform_device *pdev)
 
 #ifdef CONFIG_PM
 	/* Initialize the wait queue */
-	if (!status) {
-		bridge_suspend_data.suspended = 0;
-		init_waitqueue_head(&bridge_suspend_data.suspend_wq);
-	}
+	bridge_suspend_data.suspended = 0;
+	init_waitqueue_head(&bridge_suspend_data.suspend_wq);
 #endif
 
 	SERVICES_Init();
@@ -434,6 +432,12 @@ static int __devexit omap34xx_bridge_remove(struct platform_device *pdev)
 #endif
 
 func_cont:
+
+#ifdef CONFIG_PM
+	/* The suspend wait queue should not have anything waiting on it
+	   since remove won't be called while the file is open */
+	DBC_Assert(!waitqueue_active(&bridge_suspend_data.suspend_wq));
+#endif
 	MEM_ExtPhysPoolRelease();
 
 	SERVICES_Exit();
@@ -461,11 +465,13 @@ static int bridge_suspend(struct platform_device *pdev, pm_message_t state)
 	u32 status;
 	u32 command = PWR_EMERGENCYDEEPSLEEP;
 
-	status = PWR_SleepDSP(command, timeOut);
-	if (DSP_FAILED(status))
-		return -1;
-
 	bridge_suspend_data.suspended = 1;
+	status = PWR_SleepDSP(command, timeOut);
+	if (DSP_FAILED(status)) {
+		bridge_suspend_data.suspended = 0;
+		return -1;
+	}
+
 	return 0;
 }
 
@@ -506,7 +512,7 @@ static void __exit bridge_exit(void)
 	platform_driver_unregister(&bridge_driver);
 }
 
-/* This function is called when an application opens handle to the
+/* This function is called when an application opens a handle to the
  * bridge driver. */
 static int bridge_open(struct inode *ip, struct file *filp)
 {
@@ -535,7 +541,7 @@ static int bridge_open(struct inode *ip, struct file *filp)
 		status = -ENOMEM;
 	}
 
-		filp->private_data = pr_ctxt;
+	filp->private_data = pr_ctxt;
 
 #ifdef CONFIG_BRIDGE_RECOVERY
 	if (!status)
@@ -545,7 +551,7 @@ static int bridge_open(struct inode *ip, struct file *filp)
 	return status;
 }
 
-/* This function is called when an application closes handle to the bridge
+/* This function is called when all applications close handles to the bridge
  * driver. */
 static int bridge_release(struct inode *ip, struct file *filp)
 {
@@ -559,10 +565,14 @@ static int bridge_release(struct inode *ip, struct file *filp)
 	pr_ctxt = filp->private_data;
 
 	if (pr_ctxt) {
+		DSP_STATUS status;
 		flush_signals(current);
-		DRV_RemoveAllResources(pr_ctxt);
+		status = DRV_RemoveAllResources(pr_ctxt);
+		DBC_Ensure(DSP_SUCCEEDED(status));
 		if (pr_ctxt->hProcessor)
 			PROC_Detach(pr_ctxt);
+		mutex_destroy(&pr_ctxt->strm_mutex);
+		mutex_destroy(&pr_ctxt->node_mutex);
 		kfree(pr_ctxt);
 		filp->private_data = NULL;
 	}
@@ -594,7 +604,7 @@ static long bridge_ioctl(struct file *filp, unsigned int code,
 #ifdef CONFIG_PM
 	status = omap34xxbridge_suspend_lockout(&bridge_suspend_data, filp);
 	if (status != 0)
-		return status;
+		return -EAGAIN;
 #endif
 
 	/* Deduct one for the CMD_BASE. */
@@ -616,7 +626,7 @@ static long bridge_ioctl(struct file *filp, unsigned int code,
 		} else {
 			GT_1trace(driverTrace, GT_7CLASS,
 				 "IOCTL Failed, code : 0x%x\n", code);
-			status = -1;
+			status = -EINVAL;
 		}
 
 	}
@@ -634,6 +644,9 @@ static int bridge_mmap(struct file *filp, struct vm_area_struct *vma)
 	u32 status;
 
 	DBC_Assert(vma->vm_start < vma->vm_end);
+
+	/* TODO: Check for valid size. */
+	/* It looks right now like this can map all of kernel memory if requested */
 
 	vma->vm_flags |= VM_RESERVED | VM_IO;
 	vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
@@ -655,11 +668,16 @@ static int bridge_mmap(struct file *filp, struct vm_area_struct *vma)
  * process context list*/
 DSP_STATUS DRV_RemoveAllResources(HANDLE hPCtxt)
 {
-	DSP_STATUS status = DSP_SOK;
+	DSP_STATUS status;
+	DSP_STATUS rc;
 	struct PROCESS_CONTEXT *pCtxt = (struct PROCESS_CONTEXT *)hPCtxt;
-	DRV_RemoveAllSTRMResElements(pCtxt);
-	DRV_RemoveAllNodeResElements(pCtxt);
-	DRV_RemoveAllDMMResElements(pCtxt);
+	status = DRV_RemoveAllSTRMResElements(pCtxt);
+	rc = DRV_RemoveAllNodeResElements(pCtxt);
+	if (DSP_SUCCEEDED(status))
+		status = rc;
+	rc = DRV_RemoveAllDMMResElements(pCtxt);
+	if (DSP_SUCCEEDED(status))
+		status = rc;
 	pCtxt->resState = PROC_RES_FREED;
 	return status;
 }

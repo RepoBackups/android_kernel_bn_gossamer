@@ -258,18 +258,9 @@ static struct WMD_DRV_INTERFACE drvInterfaceFxns = {
 	WMD_MSG_SetQueueId,
 };
 
-static inline void tlb_flush_all(const void __iomem *base)
+void tlb_flush_all(const void __iomem *base)
 {
 	__raw_writeb(__raw_readb(base + MMU_GFLUSH) | 1, base + MMU_GFLUSH);
-}
-
-static inline void flush_all(struct WMD_DEV_CONTEXT *pDevContext)
-{
-	if (pDevContext->dwBrdState == BRD_DSP_HIBERNATION ||
-			pDevContext->dwBrdState == BRD_HIBERNATION)
-		WakeDSP(pDevContext, NULL);
-
-	tlb_flush_all(pDevContext->dwDSPMmuBase);
 }
 
 static void bad_page_dump(u32 pa, struct page *pg)
@@ -395,6 +386,42 @@ static DSP_STATUS WMD_BRD_SetState(struct WMD_DEV_CONTEXT *hDevContext,
 	struct WMD_DEV_CONTEXT *pDevContext = hDevContext;
 
 	pDevContext->dwBrdState = ulBrdState;
+	return status;
+}
+
+/**
+ * set_warmboot_addr - set address for IVA to resume after OFF transitions.
+ * @dev_ctxt:	context structure for the device
+ *
+ * The address set by this function is specified by the baseimage.
+ */
+static DSP_STATUS set_warmboot_addr(struct WMD_DEV_CONTEXT *dev_ctx)
+{
+	struct CFG_HOSTRES res;
+	struct CFG_DEVNODE *devext;
+	DSP_STATUS status;
+	u32 dynextbase, extend, extbase;	/* firmware sections */
+	u32 wbphys;				/* Warmboot physical address */
+	u32 wbbase;				/* Warmboot base address (da) */
+	u32 offset;
+
+	devext = (struct CFG_DEVNODE *)DRV_GetFirstDevExtension();
+	status = CFG_GetHostResources(devext, &res);
+	if (DSP_FAILED(status))
+		return status;
+
+	DEV_GetSymbol(dev_ctx->hDevObject, PWRM_RESTORE, &wbbase);
+	DEV_GetSymbol(dev_ctx->hDevObject, DYNEXTBASE, &dynextbase);
+	DEV_GetSymbol(dev_ctx->hDevObject, EXTBASE, &extbase);
+	DEV_GetSymbol(dev_ctx->hDevObject, EXTEND, &extend);
+	if (wbbase < extbase || wbbase > extend)
+		return DSP_EFAIL;
+
+	offset = wbbase - dynextbase;
+	wbphys = res.dwMemPhys[1] + offset;	/* dynextbase (pa) + offset */
+	status = HW_DSPSS_BootModeSet(dev_ctx->sysctrlbase,
+					HW_DSPSYSC_DIRECTBOOT, wbphys);
+
 	return status;
 }
 
@@ -719,6 +746,11 @@ static DSP_STATUS WMD_BRD_Start(struct WMD_DEV_CONTEXT *hDevContext,
 			dsp_wdt_set_timeout(CONFIG_WDT_TIMEOUT);
 			dsp_wdt_enable(true);
 #endif
+		}
+
+		status = set_warmboot_addr(pDevContext);
+
+		if (DSP_SUCCEEDED(status)) {
 			/* update board state */
 			pDevContext->dwBrdState = BRD_RUNNING;
 			/* (void)CHNLSM_EnableInterrupt(pDevContext);*/
@@ -964,10 +996,7 @@ static DSP_STATUS WMD_DEV_Create(OUT struct WMD_DEV_CONTEXT **ppDevContext,
 
 	pPtAttrs = MEM_Calloc(sizeof(struct PgTableAttrs), MEM_NONPAGED);
 	if (pPtAttrs != NULL) {
-		/* Assuming that we use only DSP's memory map
-		 * until 0x4000:0000 , we would need only 1024
-		 * L1 enties i.e L1 size = 4K */
-		pPtAttrs->L1size = 0x1000;
+		pPtAttrs->L1size = SZ_16K; /* 4096 entries of 32 bits */
 		align_size = pPtAttrs->L1size;
 		/* Align sizes are expected to be power of 2 */
 		/* we like to get aligned on L1 table size */
@@ -1464,12 +1493,14 @@ func_cont:
 		status = DSP_EFAIL;
 	}
 	/*
-	 * In any case, flush the TLB
-	 * This is called from here instead from PteUpdate to avoid unnecessary
-	 * repetition while mapping non-contiguous physical regions of a virtual
-	 * region
+	 * In any case, flush the TLB. This is called from here instead from
+	 * PteUpdate to avoid unnecessary repetition while mapping
+	 * non-contiguous physical regions of a virtual region. If the DSP
+	 * is slept do not wake it up, instead do the flush when waking it up.
 	 */
-	flush_all(pDevContext);
+	if (pDevContext->dwBrdState != BRD_DSP_HIBERNATION &&
+			pDevContext->dwBrdState != BRD_HIBERNATION)
+		tlb_flush_all(pDevContext->dwDSPMmuBase);
 	DBG_Trace(DBG_ENTER, "< WMD_BRD_MemMap status %x\n", status);
 	return status;
 }
@@ -1663,11 +1694,15 @@ skip_coarse_page:
 		}
 	}
 	/*
-	 * It is better to flush the TLB here, so that any stale old entries
-	 * get flushed
+	 * In any case, flush the TLB. This is called from here instead from
+	 * PteUpdate to avoid unnecessary repetition while mapping
+	 * non-contiguous physical regions of a virtual region. If the DSP
+	 * is slept do not wake it up, instead do the flush when waking it up.
 	 */
 EXIT_LOOP:
-	flush_all(pDevContext);
+	if (pDevContext->dwBrdState != BRD_DSP_HIBERNATION &&
+			pDevContext->dwBrdState != BRD_HIBERNATION)
+		tlb_flush_all(pDevContext->dwDSPMmuBase);
 	DBG_Trace(DBG_LEVEL1, "WMD_BRD_MemUnMap vaCurr %x, pteAddrL1 %x "
 		  "pteAddrL2 %x\n", vaCurr, pteAddrL1, pteAddrL2);
 	DBG_Trace(DBG_ENTER, "< WMD_BRD_MemUnMap status %x remBytes %x, "
@@ -1911,12 +1946,15 @@ static DSP_STATUS MemMapVmalloc(struct WMD_DEV_CONTEXT *pDevContext,
 		status = DSP_EFAIL;
 	}
 	/*
-	 * In any case, flush the TLB
-	 * This is called from here instead from PteUpdate to avoid unnecessary
-	 * repetition while mapping non-contiguous physical regions of a virtual
-	 * region
+	 * In any case, flush the TLB. This is called from here instead from
+	 * PteUpdate to avoid unnecessary repetition while mapping
+	 * non-contiguous physical regions of a virtual region. If the DSP
+	 * is slept do not wake it up, instead do the flush when waking it up.
 	 */
-	flush_all(pDevContext);
+	if (pDevContext->dwBrdState != BRD_DSP_HIBERNATION &&
+			pDevContext->dwBrdState != BRD_HIBERNATION)
+		tlb_flush_all(pDevContext->dwDSPMmuBase);
+
 	return status;
 }
 

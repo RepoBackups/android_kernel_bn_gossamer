@@ -204,6 +204,11 @@
 #define OMAP36XX_CONTROL_PROG_IO_WKUP1 (OMAP343X_CONTROL_GENERAL_WKUP + 0x020)
 #define OMAP36XX_CONTROL_VBBLDO_EFUSE_CTRL (OMAP343X_CONTROL_GENERAL_WKUP + 0X02C)
 
+/* 36xx-only RTA - Retention till Accesss control registers and bits */
+#define OMAP36XX_CONTROL_MEM_RTA_CTRL	0x40C
+#define OMAP36XX_RTA_ENABLE		0x1
+#define OMAP36XX_RTA_DISABLE 		0x0
+
 /*
  * REVISIT: This list of registers is not comprehensive - there are more
  * that should be added.
@@ -287,6 +292,9 @@
 #define OMAP343X_SCRATCHPAD		(OMAP343X_CTRL_BASE + 0x910)
 #define OMAP343X_SCRATCHPAD_ROM_OFFSET	0x19C
 
+/* Bootloader commmand block section */
+#define OMAP343X_SCRATCHPAD_BCB         (OMAP343X_CTRL_BASE + 0x8E0)
+#define OMAP343X_SCRATCHPAD_BCB_SIZE    (0x30)
 /* OMAP36XX CONTROL FUSE */
 
 #define OMAP36XX_CONTROL_FUSE_OPP1_VDD1	(OMAP2_CONTROL_GENERAL + 0x0114)
@@ -299,6 +307,45 @@
 #define OMAP36XX_CONTROL_FUSE_OPP2_VDD2	(OMAP2_CONTROL_GENERAL + 0x012c)
 
 #define OMAP36XX_CONTROL_FUSE_SR	(OMAP2_CONTROL_GENERAL + 0x0130)
+
+/*
+ * CONTROL OMAP STATUS register to identify OMAP3 features
+ */
+#define OMAP3_CONTROL_OMAP_STATUS	0x044c
+
+#define OMAP3_SGX_SHIFT			13
+#define OMAP3_SGX_MASK			(3 << OMAP3_SGX_SHIFT)
+#define		FEAT_SGX_FULL		0
+#define		FEAT_SGX_HALF		1
+#define		FEAT_SGX_NONE		2
+
+#define OMAP3_IVA_SHIFT			12
+#define OMAP3_IVA_MASK			(1 << OMAP3_SGX_SHIFT)
+#define		FEAT_IVA		0
+#define		FEAT_IVA_NONE		1
+
+#define OMAP3_L2CACHE_SHIFT		10
+#define OMAP3_L2CACHE_MASK		(3 << OMAP3_L2CACHE_SHIFT)
+#define		FEAT_L2CACHE_NONE	0
+#define		FEAT_L2CACHE_64KB	1
+#define		FEAT_L2CACHE_128KB	2
+#define		FEAT_L2CACHE_256KB	3
+
+#define OMAP3_ISP_SHIFT			5
+#define OMAP3_ISP_MASK			(1<< OMAP3_ISP_SHIFT)
+#define		FEAT_ISP		0
+#define		FEAT_ISP_NONE		1
+
+#define OMAP3_NEON_SHIFT		4
+#define OMAP3_NEON_MASK			(1<< OMAP3_NEON_SHIFT)
+#define		FEAT_NEON		0
+#define		FEAT_NEON_NONE		1
+
+#define OMAP3_ISP2P_SHIFT		0
+#define OMAP3_ISP2P_MASK		(1<< OMAP3_ISP2P_SHIFT)
+#define		FEAT_ISP2P		0
+#define		FEAT_ISP2P_NONE		1
+
 
 #ifndef __ASSEMBLY__
 #if defined(CONFIG_ARCH_OMAP2) || defined(CONFIG_ARCH_OMAP3)
@@ -314,6 +361,7 @@ extern void omap3_save_scratchpad_contents(void);
 extern void omap3_clear_scratchpad_contents(void);
 extern u32 *get_restore_pointer(void);
 extern u32 *get_es3_restore_pointer(void);
+extern u32 *get_omap3630_restore_pointer(void);
 extern u32 omap3_arm_context[128];
 extern void omap3_control_save_context(void);
 extern void omap3_control_restore_context(void);

@@ -2133,6 +2133,7 @@ config FB_MX3
 
 source "drivers/video/omap/Kconfig"
 source "drivers/video/omap2/Kconfig"
+source "drivers/video/omap3ep/Kconfig"
 
 source "drivers/video/backlight/Kconfig"
 source "drivers/video/display/Kconfig"

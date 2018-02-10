@@ -37,6 +37,10 @@
 #include "_tiomap.h"
 #include "_tiomap_pwr.h"
 #include "tiomap_io.h"
+#include <hw_defs.h>
+#include <hw_prcm.h>
+
+
 
 static u32 ulExtBase;
 static u32 ulExtEnd;
@@ -397,6 +401,8 @@ int send_mbox_callback(void *arg)
 {
 	struct WMD_DEV_CONTEXT *dev_ctxt = (struct WMD_DEV_CONTEXT *)arg;
 	u32 temp;
+	unsigned long flags;
+	DEFINE_SPINLOCK(irq_lock);
 
 	if (!dev_ctxt)
 		return -EFAULT;
@@ -410,6 +416,7 @@ int send_mbox_callback(void *arg)
 		dsp_wdt_enable(true);
 #endif
 
+		spin_lock_irqsave(&irq_lock, flags);
 		/* Enabling Dpll in lock mode*/
 		temp = (u32) *((REG_UWORD32 *)
 				((u32) (dev_ctxt->cmbase) + 0x34));
@@ -418,22 +425,40 @@ int send_mbox_callback(void *arg)
 			(u32) temp;
 		temp = (u32) *((REG_UWORD32 *)
 				((u32) (dev_ctxt->cmbase) + 0x4));
-		temp = (temp & 0xFFFFFC8) | 0x37;
+		temp = (temp & 0xFFFFF08) | 0x37;
 
 		*((REG_UWORD32 *) ((u32) (dev_ctxt->cmbase) + 0x4)) =
 			(u32) temp;
 		/* Restore mailbox settings */
 		omap_mbox_restore_ctx(dev_ctxt->mbox);
 
-		/*  Access MMU SYS CONFIG register to generate a short wakeup */
-		temp = (u32) *((REG_UWORD32 *) ((u32)
-					(dev_ctxt->dwDSPMmuBase) + 0x10));
+		/*
+		  * Short wake up source is any read access to an MMU
+		  * registers. Making a MMU flush or accessing any other MMU
+		  * register before getting to this point will have the IVA in
+		  * ON state or Retention if the DSP has moved to that state,
+		  * having the Short Wakeup again is redundant and brings
+		  * issues when accessing the MMU after the DSP has started
+		  * its restore sequence. We will access only if the DSP
+		  * is not in RET or ON.
+		  */
+		HW_PWRST_IVA2RegGet(dev_ctxt->prmbase, &temp);
+		if (!(temp & HW_PWR_STATE_RET) && !(temp & HW_PWR_STATE_ON))
+			/*
+			  * Flush the TLBs, this will generate the
+			  * shortwakeup.  Also wait for the DSP to restore.
+			  */
+                        tlb_flush_all(dev_ctxt->dwDSPMmuBase);
 
-	} else if (dev_ctxt->dwBrdState == BRD_RETENTION)
-		/* Restart the peripheral clocks */
-		DSP_PeripheralClocks_Enable(dev_ctxt, NULL);
+		udelay(10);
+                spin_unlock_irqrestore(&irq_lock, flags);
+                dev_ctxt->dwBrdState = BRD_RUNNING;
+        } else if (dev_ctxt->dwBrdState == BRD_RETENTION) {
+                /* Restart the peripheral clocks */
+                DSP_PeripheralClocks_Enable(dev_ctxt, NULL);
+                dev_ctxt->dwBrdState = BRD_RUNNING;
+        }
 
-	dev_ctxt->dwBrdState = BRD_RUNNING;
 	return 0;
 }
 

@@ -102,7 +102,14 @@ static void early_suspend(struct work_struct *work)
 	if (debug_mask & DEBUG_SUSPEND)
 		pr_info("early_suspend: sync\n");
 
-	sys_sync();
+#ifndef CONFIG_MACH_OMAP3621_EVT1A
+    // For the NOOKcolor this can potentially take a really long
+    // time if there are USB transfers in progress.
+    // Instead of doing the sys_sync here we rely on the fact that
+    // sys_sync is called before entering suspend.
+    sys_sync();
+#endif
+
 abort:
 	spin_lock_irqsave(&state_lock, irqflags);
 	if (state == SUSPEND_REQUESTED_AND_SUSPENDED)

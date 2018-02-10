@@ -47,6 +47,8 @@ struct omap_uart_state {
 
 	void __iomem *wk_st;
 	void __iomem *wk_en;
+	void __iomem *prm_irqenable;
+	void __iomem *prm_irqstatus;
 	u32 wk_mask;
 	u32 padconf;
 
@@ -84,7 +86,7 @@ static void omap_serial_pm(struct uart_port *port, unsigned int state,
 		    unsigned int old)
 {
 	if (old == 3)
-		wake_lock_timeout(&omap_serial_wakelock, 10*HZ);
+		wake_lock_timeout(&omap_serial_wakelock, 1*HZ);
 }
 
 static struct plat_serial8250_port serial_platform_data[] = {
@@ -106,7 +108,12 @@ static struct plat_serial8250_port serial_platform_data[] = {
 		.regshift	= 2,
 		.uartclk	= OMAP24XX_BASE_BAUD * 16,
 		.pm		= omap_serial_pm,
-	}, {
+	},
+#if !(defined(CONFIG_MACH_OMAP3621_BOXER) ||\
+	defined (CONFIG_MACH_OMAP3621_EVT1A) ||\
+	defined (CONFIG_MACH_OMAP_3621_EDP) ||\
+	defined (CONFIG_MACH_OMAP3621_GOSSAMER))
+        {
 		.membase	= IO_ADDRESS(OMAP_UART3_BASE),
 		.mapbase	= OMAP_UART3_BASE,
 		.irq		= 74,
@@ -116,6 +123,7 @@ static struct plat_serial8250_port serial_platform_data[] = {
 		.uartclk	= OMAP24XX_BASE_BAUD * 16,
 		.pm		= omap_serial_pm,
 	},
+#endif
 #define QUART_CLK (1843200)
 #if defined(CONFIG_MACH_OMAP_ZOOM2) || defined(CONFIG_MACH_OMAP_ZOOM3)
 	{
@@ -157,6 +165,10 @@ static struct resource omap2_uart2_resources[] = {
 	}
 };
 
+#if !(defined(CONFIG_MACH_OMAP3621_BOXER) ||\
+	defined (CONFIG_MACH_OMAP3621_EVT1A) ||\
+	defined (CONFIG_MACH_OMAP_3621_EDP) ||\
+	defined (CONFIG_MACH_OMAP3621_GOSSAMER))
 static struct resource omap2_uart3_resources[] = {
 	{
 		.start		= OMAP_UART3_BASE,
@@ -167,6 +179,7 @@ static struct resource omap2_uart3_resources[] = {
 		.flags		= IORESOURCE_IRQ,
 	}
 };
+#endif
 
 #if defined(CONFIG_MACH_OMAP_ZOOM2) || defined(CONFIG_MACH_OMAP_ZOOM3)
 static struct resource omap2_quaduart_resources[] = {
@@ -194,12 +207,19 @@ static struct platform_device uart2_device = {
 	.num_resources		= ARRAY_SIZE(omap2_uart2_resources),
 	.resource		= omap2_uart2_resources,
 };
+
+#if !(defined(CONFIG_MACH_OMAP3621_BOXER) ||\
+	defined (CONFIG_MACH_OMAP3621_EVT1A) ||\
+	defined (CONFIG_MACH_OMAP3621_EDP) ||\
+	defined (CONFIG_MACH_OMAP_3621_EDP) ||\
+	defined (CONFIG_MACH_OMAP3621_GOSSAMER))
 static struct platform_device uart3_device = {
 	.name			= "omap-uart",
 	.id			= 3,
 	.num_resources		= ARRAY_SIZE(omap2_uart3_resources),
 	.resource		= omap2_uart3_resources,
 };
+#endif
 
 #if defined(CONFIG_MACH_OMAP_ZOOM2) || defined(CONFIG_MACH_OMAP_ZOOM3)
 static struct platform_device quaduart_device = {
@@ -214,7 +234,12 @@ static struct platform_device quaduart_device = {
 static struct platform_device *uart_devices[] = {
 	&uart1_device,
 	&uart2_device,
+#if !(defined(CONFIG_MACH_OMAP3621_BOXER) ||\
+	defined (CONFIG_MACH_OMAP3621_EVT1A) ||\
+	defined (CONFIG_MACH_OMAP_3621_EDP) ||\
+	defined (CONFIG_MACH_OMAP3621_GOSSAMER))
 	&uart3_device,
+#endif
 #if defined(CONFIG_MACH_OMAP_ZOOM2) || defined(CONFIG_MACH_OMAP_ZOOM3)
 	&quaduart_device
 #endif
@@ -474,7 +499,16 @@ void omap_uart_resume_idle(int num)
 
 			/* Check for normal UART wakeup */
 			if (__raw_readl(uart->wk_st) & uart->wk_mask) {
+				/* Clear the UART wake up bit only if PRCM
+				 * interrupt is NOT pending to avoid race
+				 * condition with prcm interrupt handler.
+				 */
+				if (!(uart->prm_irqenable &&
+				      (__raw_readl(uart->prm_irqenable) &
+				       __raw_readl(uart->prm_irqstatus) &
+				       OMAP3430_WKUP_ST))) {
 				__raw_writel(uart->wk_mask, uart->wk_st);
+				}
 				omap_uart_block_sleep(uart);
 			}
 
@@ -614,6 +648,10 @@ static void omap_uart_idle_init(struct omap_uart_state *uart)
 
 		uart->wk_en = OMAP34XX_PRM_REGADDR(mod, PM_WKEN1);
 		uart->wk_st = OMAP34XX_PRM_REGADDR(mod, PM_WKST1);
+		uart->prm_irqenable = OMAP34XX_PRM_REGADDR(OCP_MOD,
+					OMAP2_PRM_IRQENABLE_MPU_OFFSET);
+		uart->prm_irqstatus = OMAP34XX_PRM_REGADDR(OCP_MOD,
+					OMAP2_PRM_IRQSTATUS_MPU_OFFSET);
 		switch (uart->num) {
 		case 0:
 			wk_mask = OMAP3430_ST_UART1_MASK;
@@ -645,6 +683,8 @@ static void omap_uart_idle_init(struct omap_uart_state *uart)
 		uart->padconf = padconf;
 	} else if (cpu_is_omap24xx()) {
 		u32 wk_mask = 0;
+                uart->prm_irqenable = 0;
+                uart->prm_irqstatus = 0;
 
 		if (cpu_is_omap2430()) {
 			uart->wk_en = OMAP2430_PRM_REGADDR(CORE_MOD, PM_WKEN1);
@@ -670,6 +710,8 @@ static void omap_uart_idle_init(struct omap_uart_state *uart)
 		uart->wk_st = 0;
 		uart->wk_mask = 0;
 		uart->padconf = 0;
+		uart->prm_irqenable = 0;
+		uart->prm_irqstatus = 0;
 	}
 
 #ifdef CONFIG_SERIAL_OMAP
@@ -792,7 +834,6 @@ void __init omap_serial_init(void)
 
 	if (info == NULL)
 		return;
-
 	for (i = 0; i < OMAP_MAX_NR_PORTS; i++) {
 		struct plat_serial8250_port *p = serial_platform_data + i;
 		struct omap_uart_state *uart = &omap_uart[i];

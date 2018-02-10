@@ -384,5 +384,16 @@ extern DSP_STATUS WMD_TLB_DspVAToMpuPA(struct WMD_DEV_CONTEXT *pDevContext,
        extern DSP_STATUS sm_interrupt_dsp(struct WMD_DEV_CONTEXT*
 						     hDevContext, u16 wMbVal);
 
+/*
+ *  ======== tlb_flush_all ========
+ *  Purpose:
+ *      Flush the DSP MMU TLBs entries.
+ *  Parameters:
+ *	base:	MMU base address.
+ *  Returns:
+ */
+	extern void tlb_flush_all(const void __iomem *base);
+
+
 #endif				/* _TIOMAP_ */
 

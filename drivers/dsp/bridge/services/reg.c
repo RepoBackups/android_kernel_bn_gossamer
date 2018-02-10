@@ -139,7 +139,7 @@ bool REG_Init(void)
 	fInit = regsupInit();
 
 	if (crefs == 0)
-		SYNC_InitializeCS(&reglock);
+		SYNC_InitializeDPCCS(&reglock);
 	crefs++;
 
 	GT_0trace(REG_debugMask, GT_5CLASS, "REG_Init\n");

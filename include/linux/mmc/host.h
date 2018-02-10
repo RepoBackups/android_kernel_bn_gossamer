@@ -118,6 +118,7 @@ struct mmc_host {
 #define MMC_CAP_SPI		(1 << 4)	/* Talks only SPI protocols */
 #define MMC_CAP_NEEDS_POLL	(1 << 5)	/* Needs polling for card-detection */
 #define MMC_CAP_8_BIT_DATA	(1 << 6)	/* Can the host do 8 bit transfers */
+#define MMC_CAP_WAIT_WHILE_BUSY	(1 << 9)	/* Waits while card is busy */
 
 	/* host specific block data */
 	unsigned int		max_seg_size;	/* see blk_queue_max_segment_size */
@@ -217,6 +218,7 @@ extern int mmc_resume_host(struct mmc_host *);
 
 extern void mmc_detect_change(struct mmc_host *, unsigned long delay);
 extern void mmc_request_done(struct mmc_host *, struct mmc_request *);
+extern void mmc_flush_scheduled_work(void);
 
 static inline void mmc_signal_sdio_irq(struct mmc_host *host)
 {
@@ -229,5 +231,11 @@ struct regulator;
 int mmc_regulator_get_ocrmask(struct regulator *supply);
 int mmc_regulator_set_ocr(struct regulator *supply, unsigned short vdd_bit);
 
+#define MMC_SLEEP_TIMEOUT_DEFAULT	8388608  /* MAX TIMEOUT FOR TRANSITION FROM STANDBY STATE TO SLEEP STATE 100ns for one unit */
+#define MMC_SLEEP_TIMEOUT_OLD_REV	27
+
+int mmc_card_awake(struct mmc_host *host);
+int mmc_card_sleep(struct mmc_host *host);
+int mmc_card_can_sleep(struct mmc_host *host);
 #endif
 

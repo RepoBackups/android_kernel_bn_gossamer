@@ -20,6 +20,7 @@
 #include <linux/init.h>
 #include <linux/clk.h>
 #include <linux/io.h>
+#include <linux/delay.h>
 
 #include <mach/common.h>
 #include <mach/control.h>
@@ -128,7 +129,7 @@ u32 omap_prcm_get_reset_sources(void)
 EXPORT_SYMBOL(omap_prcm_get_reset_sources);
 
 /* Resets clock rates and reboots the system. Only called from system.h */
-void omap_prcm_arch_reset(char mode)
+void omap_prcm_arch_reset(char mode, const char *cmd)
 {
 	s16 prcm_offs;
 
@@ -140,6 +141,20 @@ void omap_prcm_arch_reset(char mode)
 	} else if (cpu_is_omap34xx()) {
 		u32 l;
 
+		/* Copy cmd into scratchpad memmory if any */
+		if(cmd != 0)
+		{
+			u16  counter = 0;
+		  
+			while((counter < (OMAP343X_SCRATCHPAD_BCB_SIZE-1)) && (cmd[counter]!='\0')) {
+				omap_writeb(cmd[counter], OMAP343X_SCRATCHPAD_BCB + counter);
+				counter++;
+			}
+
+			omap_writeb('\0', OMAP343X_SCRATCHPAD_BCB + counter);
+			
+		} 
+
 		prcm_offs = OMAP3430_GR_MOD;
 		l = ('B' << 24) | ('M' << 16) | mode;
 		/* Reserve the first word in scratchpad for communicating
@@ -149,6 +164,14 @@ void omap_prcm_arch_reset(char mode)
 		 * Configuration. */
 		omap_writel(l, OMAP343X_SCRATCHPAD + 4);
 
+		/* 
+		   Without this mdelay sometimes the dpll_warmreset
+		   sometimes get stuck. Suspicion is that the DSP has somehow
+		   entered a loop and keep the SDRAM from entering idle,
+		   halting the warmreset to completing.
+		*/
+
+		mdelay(60);
 		omap3_configure_core_dpll_warmreset();
 
 	} else

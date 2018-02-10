@@ -26,6 +26,8 @@
 #ifndef __ASM_ARCH_OMAP_CPU_H
 #define __ASM_ARCH_OMAP_CPU_H
 
+#include <linux/bitops.h>
+
 struct omap_chip_id {
 	u16 oc;
 	u8 type;
@@ -150,6 +152,8 @@ IS_OMAP_SUBCLASS(363x, 0x363)
 #define cpu_is_omap34xx()		0
 #define cpu_is_omap343x()		0
 #define cpu_is_omap3630()		0
+#define cpu_is_omap3621()		0
+#define cpu_is_omap3622()		0
 
 #if defined(MULTI_OMAP1)
 # if defined(CONFIG_ARCH_OMAP730)
@@ -220,6 +224,16 @@ IS_OMAP_SUBCLASS(363x, 0x363)
 # endif
 #endif
 
+#if defined(CONFIG_MACH_OMAP3621_BOXER) ||\
+	defined(CONFIG_MACH_OMAP3621_EVT1A) ||\
+	defined(CONFIG_MACH_OMAP_3621_EDP) ||\
+	defined(CONFIG_MACH_OMAP3621_GOSSAMER)
+# undef cpu_is_omap3621
+# define cpu_is_omap3621()  is_omap363x()
+# undef cpu_is_omap3622
+# define cpu_is_omap3622() (cpu_is_omap3621() && omap3_has_isp2p())
+#endif
+ 
 /*
  * Macros to detect individual cpu types.
  * These are only rarely needed.
@@ -347,9 +361,10 @@ IS_OMAP_TYPE(3430, 0x3430)
 #define OMAP3430_REV_ES2_1		0x34302034
 #define OMAP3430_REV_ES3_0		0x34303034
 #define OMAP3430_REV_ES3_1		0x34304034
-#define OMAP3430_REV_ES3_1_1	0x34305034
+#define OMAP3430_REV_ES3_1_1		0x34305034
 #define OMAP3630_REV_ES1_0		0x36300034
 #define OMAP3630_REV_ES1_1		0x36300134
+#define OMAP3630_REV_ES1_2		0x36300234
 
 /*
  * omap_chip bits
@@ -372,11 +387,16 @@ IS_OMAP_TYPE(3430, 0x3430)
 #define CHIP_IS_OMAP3430ES2		(1 << 4)
 #define CHIP_IS_OMAP3430ES3_0		(1 << 5)
 #define CHIP_IS_OMAP3430ES3_1		(1 << 6)
-#define CHIP_IS_OMAP3430ES3_1_1	(1 << 7)
+#define CHIP_IS_OMAP3430ES3_1_1		(1 << 7)
 #define CHIP_IS_OMAP3630ES1		(1 << 8)
 #define CHIP_IS_OMAP3630ES1_1		(1 << 9)
+#define CHIP_IS_OMAP3630ES1_2		(1 << 10)
 
 #define CHIP_IS_OMAP24XX		(CHIP_IS_OMAP2420 | CHIP_IS_OMAP2430)
+
+#define CHIP_IS_OMAP3630	(CHIP_IS_OMAP3630ES1 |\
+				 CHIP_IS_OMAP3630ES1_1 |\
+				 CHIP_IS_OMAP3630ES1_2)
 
 /*
  * "GE" here represents "greater than or equal to" in terms of ES
@@ -388,8 +408,9 @@ IS_OMAP_TYPE(3430, 0x3430)
 					 CHIP_IS_OMAP3430ES3_0 | \
 					 CHIP_IS_OMAP3430ES3_1 | \
 					 CHIP_IS_OMAP3430ES3_1_1 |\
-					 CHIP_IS_OMAP3630ES1) |\
-					 CHIP_IS_OMAP3630ES1_1
+					 CHIP_IS_OMAP3630ES1 |\
+					 CHIP_IS_OMAP3630ES1_1 |\
+					 CHIP_IS_OMAP3630ES1_2)
 
 #define CHIP_GE_OMAP3430ES3_1		(CHIP_IS_OMAP3430ES3_1 | \
 					 CHIP_IS_OMAP3430ES3_1_1 | \
@@ -415,7 +436,33 @@ int omap_type(void);
 #define OMAP_3630	0x3630
 #define OMAP_3630_800	0x3630800
 #define OMAP_3630_1000	0x36301000
-#define OMAP_3630_1200	0x36301200
+
+/*
+ * Runtime detection of OMAP3 features
+ */
+extern u32 omap3_features;
+
+#define OMAP3_HAS_L2CACHE		BIT(0)
+#define OMAP3_HAS_IVA			BIT(1)
+#define OMAP3_HAS_SGX			BIT(2)
+#define OMAP3_HAS_NEON			BIT(3)
+#define OMAP3_HAS_ISP			BIT(4)
+#define OMAP3_HAS_192MHZ_CLK		BIT(5)
+#define OMAP3_HAS_ISP2P			BIT(6)
+
+#define OMAP3_HAS_FEATURE(feat,flag)			\
+static inline unsigned int omap3_has_ ##feat(void)	\
+{							\
+	return (omap3_features & OMAP3_HAS_ ##flag);	\
+}							\
+
+OMAP3_HAS_FEATURE(l2cache, L2CACHE)
+OMAP3_HAS_FEATURE(sgx, SGX)
+OMAP3_HAS_FEATURE(iva, IVA)
+OMAP3_HAS_FEATURE(neon, NEON)
+OMAP3_HAS_FEATURE(isp, ISP)
+OMAP3_HAS_FEATURE(isp2p, ISP2P)
+OMAP3_HAS_FEATURE(192mhz_clk, 192MHZ_CLK)
 
 void omap2_check_revision(void);
 

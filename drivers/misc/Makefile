@@ -27,3 +27,5 @@ obj-y				+= eeprom/
 obj-$(CONFIG_WL127X_RFKILL)	+= wl127x-rfkill.o
 obj-$(CONFIG_APANIC)		+= apanic.o
 obj-y				+= ti-st/
+obj-$(CONFIG_MAX9635)           += max9635.o
+obj-${CONFIG_ENCORE_MODEM_MGR}  += encore_modem_mgr.o

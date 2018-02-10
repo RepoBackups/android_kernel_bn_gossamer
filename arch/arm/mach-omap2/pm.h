@@ -90,12 +90,14 @@ extern int omap2_pm_debug;
 extern void pm_dbg_update_time(struct powerdomain *pwrdm, int prev);
 extern int pm_dbg_regset_save(int reg_set);
 extern int pm_dbg_regset_init(int reg_set);
+extern void pm_dbg_print(int reg_set);
 #else
 #define omap2_pm_dump(mode, resume, us)		do {} while (0);
 #define omap2_pm_debug				0
 #define pm_dbg_update_time(pwrdm, prev) do {} while (0);
 #define pm_dbg_regset_save(reg_set) do {} while (0);
 #define pm_dbg_regset_init(reg_set) do {} while (0);
+#define pm_dbg_print(reg_set) do {} while (0);
 #endif /* CONFIG_PM_DEBUG */
 
 extern void omap24xx_idle_loop_suspend(void);
@@ -115,7 +117,11 @@ static inline void omap2_block_sleep(void) { }
 static inline void omap2_allow_sleep(void) { }
 #endif
 
+#ifdef CONFIG_CPU_IDLE
 extern void omap3_cpuidle_update_states(void);
+#else
+static inline void omap3_cpuidle_update_states(void) { return; }
+#endif
 extern unsigned int omap24xx_idle_loop_suspend_sz;
 extern unsigned int omap34xx_suspend_sz;
 extern unsigned int save_secure_ram_context_sz;

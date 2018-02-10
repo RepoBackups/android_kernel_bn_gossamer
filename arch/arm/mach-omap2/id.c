@@ -27,6 +27,8 @@ static struct omap_chip_id omap_chip;
 static unsigned int omap_revision, omap_revision_id;
 static char *rev_name = "ES1.0                         ";
 
+u32 omap3_features;
+
 unsigned int omap_rev(void)
 {
 	return omap_revision;
@@ -161,6 +163,35 @@ void __init omap24xx_check_revision(void)
 	pr_info("\n");
 }
 
+#define OMAP3_CHECK_FEATURE(status,feat)				\
+	if (((status & OMAP3_ ##feat## _MASK) 				\
+		>> OMAP3_ ##feat## _SHIFT) != FEAT_ ##feat## _NONE) { 	\
+		omap3_features |= OMAP3_HAS_ ##feat;			\
+	}
+
+void __init omap3_check_features(void)
+{
+	u32 status;
+
+	omap3_features = 0;
+
+	status = omap_ctrl_readl(OMAP3_CONTROL_OMAP_STATUS);
+
+	OMAP3_CHECK_FEATURE(status, L2CACHE);
+	OMAP3_CHECK_FEATURE(status, IVA);
+	OMAP3_CHECK_FEATURE(status, SGX);
+	OMAP3_CHECK_FEATURE(status, NEON);
+	OMAP3_CHECK_FEATURE(status, ISP);
+	OMAP3_CHECK_FEATURE(status, ISP2P);
+	if (cpu_is_omap3630())
+		omap3_features |= OMAP3_HAS_192MHZ_CLK;
+
+	/*
+	 * TODO: Get additional info (where applicable)
+	 *       e.g. Size of L2 cache.
+	 */
+}
+
 void __init omap34xx_check_revision(void)
 {
 	u32 cpuid, idcode;
@@ -235,14 +266,18 @@ void __init omap34xx_check_revision(void)
 			omap_revision = OMAP3630_REV_ES1_1;
 			rev_name = "ES1.1";
 			break;
+		case 2:
+			omap_revision = OMAP3630_REV_ES1_2;
+			rev_name = "ES1.2";
+			break;
 		default:
 			/* Use the latest known revision as default */
-			omap_revision = OMAP3630_REV_ES1_1;
+			omap_revision = OMAP3630_REV_ES1_2;
 		}
 		break;
 	default:
 		/* Unknown default to latest silicon rev as default*/
-		omap_revision = OMAP3630_REV_ES1_1;
+		omap_revision = OMAP3630_REV_ES1_2;
 	}
 
 out:
@@ -261,8 +296,10 @@ void __init omap2_check_revision(void)
 	 */
 	if (cpu_is_omap24xx())
 		omap24xx_check_revision();
-	else if (cpu_is_omap34xx())
+	else if (cpu_is_omap34xx()) {
 		omap34xx_check_revision();
+		omap3_check_features();
+	}
 	else
 		pr_err("OMAP revision unknown, please fix!\n");
 
@@ -292,9 +329,16 @@ void __init omap2_check_revision(void)
 		else if (omap_rev() == OMAP3630_REV_ES1_1)
 				omap_chip.oc |= CHIP_IS_OMAP3630ES1 |
 						CHIP_IS_OMAP3630ES1_1;
+		else if (omap_rev() == OMAP3630_REV_ES1_2)
+				omap_chip.oc |= CHIP_IS_OMAP3630ES1 |
+						CHIP_IS_OMAP3630ES1_1 |
+						CHIP_IS_OMAP3630ES1_2;
 	} else {
 		pr_err("Uninitialized omap_chip, please fix!\n");
 	}
+
+	pr_info("OMAP: omap_rev:0x%08x omap_chip.oc:0x%08x\n",
+	    omap_rev(), omap_chip.oc );
 }
 
 /*

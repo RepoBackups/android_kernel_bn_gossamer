@@ -31,9 +31,17 @@
 #include <asm/mach-types.h>
 
 static u8 triton_next_free_address = 0x2b;
+static uint32_t twl4030_rev;
 
 #define PWR_P1_SW_EVENTS	0x10
 #define PWR_DEVOFF	(1<<0)
+#define STOPON_PWRON (1<<6)
+
+#ifdef CONFIG_TWL4030_POWER_STOPON
+#define CONFIG_P1_SW_FEATURES    STOPON_PWRON
+#else
+#define CONFIG_P1_SW_FEATURES    0
+#endif
 
 #define PHY_TO_OFF_PM_MASTER(p)		(p - 0x36)
 #define PHY_TO_OFF_PM_RECEIVER(p)	(p - 0x5b)
@@ -56,6 +64,7 @@ static u8 triton_next_free_address = 0x2b;
 #define ENABLE_WARMRESET (1<<4)
 
 #define END_OF_SCRIPT		0x3f
+static u8 triton_sleep_script_address = END_OF_SCRIPT;
 
 #define R_SEQ_ADD_A2S		PHY_TO_OFF_PM_MASTER(0x55)
 #define R_SEQ_ADD_SA12		PHY_TO_OFF_PM_MASTER(0x56)
@@ -65,13 +74,47 @@ static u8 triton_next_free_address = 0x2b;
 #define R_MEMORY_DATA		PHY_TO_OFF_PM_MASTER(0x5a)
 
 #define R_PROTECT_KEY		0x0E
-#define KEY_1			0xC0
-#define KEY_2			0x0C
 
-/* resource configuration registers */
+#define RESOURCE_TYPE_RECONFIG_IGNORE   0xFF
 
-#define DEVGROUP_OFFSET		0
+#define KEY_1                  (twl_rev_is_tps65921() ? 0xFC : 0xC0)
+#define KEY_2                  (twl_rev_is_tps65921() ? 0x96 : 0x0C)
+
+/* resource configuration registers
+   <RESOURCE>_DEV_GRP   at address 'n+0'
+   <RESOURCE>_TYPE      at address 'n+1'
+   <RESOURCE>_REMAP     at address 'n+2'
+   <RESOURCE>_DEDICATED at address 'n+3'
+*/
+#define DEV_GRP_OFFSET		0
 #define TYPE_OFFSET		1
+#define REMAP_OFFSET		2
+#define DEDICATED_OFFSET	3
+
+/* Bit positions in the registers */
+
+/* <RESOURCE>_DEV_GRP */
+#define DEV_GRP_SHIFT		5
+#define DEV_GRP_MASK		(7 << DEV_GRP_SHIFT)
+
+/* <RESOURCE>_TYPE */
+#define TYPE_SHIFT		0
+#define TYPE_MASK		(7 << TYPE_SHIFT)
+#define TYPE2_SHIFT		3
+#define TYPE2_MASK		(3 << TYPE2_SHIFT)
+
+/* <RESOURCE>_REMAP */
+#define SLEEP_STATE_SHIFT	0
+#define SLEEP_STATE_MASK	(0xf << SLEEP_STATE_SHIFT)
+#define OFF_STATE_SHIFT		4
+#define OFF_STATE_MASK		(0xf << OFF_STATE_SHIFT)
+
+#define TWL_SIL_TYPE(rev)      ((rev) & 0x00FFFFFF)
+
+#define R_UNLOCK_TEST_REG      0x12
+#define TWL_EEPROM_R_UNLOCK    0x49
+
+#define TWL_SIL_TPS65921       0x77802F
 
 static u8 res_config_addrs[] = {
 	[RES_VAUX1]	= 0x17,
@@ -184,7 +227,8 @@ static int __init config_wakeup12_sequence(u8 address)
 					R_P2_SW_EVENTS);
 
 	if (machine_is_omap_3430sdp() || machine_is_omap_ldp() ||
-	    machine_is_omap_zoom2() || machine_is_omap_zoom3()) {
+	    machine_is_omap_zoom2() || machine_is_omap_zoom3() ||
+	    machine_is_omap3630_edp1() || machine_is_omap3621_edp1()) {
 		u8 uninitialized_var(data);
 		/* Disabling AC charger effect on sleep-active transitions */
 		err |= twl4030_i2c_read_u8(TWL4030_MODULE_PM_MASTER, &data,
@@ -236,19 +280,19 @@ static int __init config_warmreset_sequence(u8 address)
 	/* P1/P2/P3 enable WARMRESET */
 	err |= twl4030_i2c_read_u8(TWL4030_MODULE_PM_MASTER, &rd_data,
 					R_P1_SW_EVENTS);
-	rd_data |= ENABLE_WARMRESET;
+	rd_data |= ENABLE_WARMRESET | CONFIG_P1_SW_FEATURES;
 	err |= twl4030_i2c_write_u8(TWL4030_MODULE_PM_MASTER, rd_data,
 					R_P1_SW_EVENTS);
 
 	err |= twl4030_i2c_read_u8(TWL4030_MODULE_PM_MASTER, &rd_data,
 					R_P2_SW_EVENTS);
-	rd_data |= ENABLE_WARMRESET;
+	rd_data |= ENABLE_WARMRESET | CONFIG_P1_SW_FEATURES;
 	err |= twl4030_i2c_write_u8(TWL4030_MODULE_PM_MASTER, rd_data,
 					R_P2_SW_EVENTS);
 
 	err |= twl4030_i2c_read_u8(TWL4030_MODULE_PM_MASTER, &rd_data,
 					R_P3_SW_EVENTS);
-	rd_data |= ENABLE_WARMRESET;
+	rd_data |= ENABLE_WARMRESET | CONFIG_P1_SW_FEATURES;
 	err |= twl4030_i2c_write_u8(TWL4030_MODULE_PM_MASTER, rd_data,
 					R_P3_SW_EVENTS);
 
@@ -258,9 +302,11 @@ static int __init config_warmreset_sequence(u8 address)
 	return err;
 }
 
-void twl4030_configure_resource(struct twl4030_resconfig *rconfig)
+static void __init twl4030_configure_resource(struct twl4030_resconfig *rconfig)
 {
 	int rconfig_addr;
+	int err = 0;
+	u8 remap = 0;
 	u8 uninitialized_var(type);
 
 	if (rconfig->resource > NUM_OF_RESOURCES) {
@@ -277,7 +323,7 @@ void twl4030_configure_resource(struct twl4030_resconfig *rconfig)
 	if (rconfig->devgroup >= 0)
 		twl4030_i2c_write_u8(TWL4030_MODULE_PM_RECEIVER,
 					rconfig->devgroup << 5,
-					rconfig_addr + DEVGROUP_OFFSET);
+					rconfig_addr + DEV_GRP_OFFSET);
 
 	/* Set resource types */
 
@@ -290,18 +336,47 @@ void twl4030_configure_resource(struct twl4030_resconfig *rconfig)
 		return;
 	}
 
-	if (rconfig->type >= 0) {
+	if (RESOURCE_TYPE_RECONFIG_IGNORE != rconfig->type) {
 		type &= ~7;
-		type |= rconfig->type;
+		type |= (rconfig->type & 7);
 	}
 
-	if (rconfig->type2 >= 0) {
+	if (RESOURCE_TYPE_RECONFIG_IGNORE != rconfig->type2) {
 		type &= ~(3 << 3);
-		type |= rconfig->type2 << 3;
+		type |= (rconfig->type2 & 3) << 3;
 	}
 
 	twl4030_i2c_write_u8(TWL4030_MODULE_PM_RECEIVER,
 				type, rconfig_addr + TYPE_OFFSET);
+
+	/* Set remap states */
+	err = twl4030_i2c_read_u8(TWL4030_MODULE_PM_RECEIVER, &remap,
+			      rconfig_addr + REMAP_OFFSET);
+	if (err < 0) {
+		printk(KERN_ERR "TWL4030 Resource %d remap could not be read\n",
+			rconfig->resource);
+		return;
+	}
+
+	if (rconfig->remap_off != TWL4030_RESCONFIG_UNDEF) {
+		remap &= ~OFF_STATE_MASK;
+		remap |= rconfig->remap_off << OFF_STATE_SHIFT;
+	}
+
+	if (rconfig->remap_sleep != TWL4030_RESCONFIG_UNDEF) {
+		remap &= ~SLEEP_STATE_MASK;
+		remap |= rconfig->remap_sleep << SLEEP_STATE_SHIFT;
+	}
+
+	err = twl4030_i2c_write_u8(TWL4030_MODULE_PM_RECEIVER,
+			       remap,
+			       rconfig_addr + REMAP_OFFSET);
+	if (err < 0) {
+		pr_err("TWL4030 failed to program remap\n");
+		return;
+	}
+
+	return;
 
 }
 
@@ -325,8 +400,42 @@ static int __init load_triton_script(struct twl4030_script *tscript)
 	if (tscript->flags & TRITON_WAKEUP3_SCRIPT)
 		err |= config_wakeup3_sequence(address);
 
-	if (tscript->flags & TRITON_SLEEP_SCRIPT)
+	if (tscript->flags & TRITON_SLEEP_SCRIPT) {
+		triton_sleep_script_address = address;
 		err |= config_sleep_sequence(address);
+	}
+
+	return err;
+}
+
+int twl4030_add_sleep_script(void)
+{
+	int err;
+
+	err = twl4030_i2c_write_u8(TWL4030_MODULE_PM_MASTER, KEY_1,
+			R_PROTECT_KEY);
+	if (err) {
+		pr_err("twl4030: unable to unlock PROTECT_KEY\n");
+		return err;
+	}
+
+	err = twl4030_i2c_write_u8(TWL4030_MODULE_PM_MASTER, KEY_2,
+			R_PROTECT_KEY);
+	if (err) {
+		pr_err("twl4030: unable to unlock PROTECT_KEY\n");
+		return err;
+	}
+
+	err = twl4030_i2c_write_u8(TWL4030_MODULE_PM_MASTER, triton_sleep_script_address, R_SEQ_ADD_A2S);
+
+	if (err) {
+            pr_err("twl4030: unable to program sleep script address\n");
+            return err;
+        }
+
+	err = twl4030_i2c_write_u8(TWL4030_MODULE_PM_MASTER, 0, R_PROTECT_KEY);
+	if (err)
+		pr_err("TWL4030 Unable to relock registers\n");
 
 	return err;
 }
@@ -381,6 +490,32 @@ int twl4030_remove_script(u8 flags)
 	return 0;
 }
 
+static void twl4030_load_rev(void)
+{
+	int err;
+
+	err = twl4030_i2c_write_u8(TWL4030_MODULE_INTBR,
+				TWL_EEPROM_R_UNLOCK, R_UNLOCK_TEST_REG);
+	if (err)
+		pr_err("TWL4030 Unable to unlock IDCODE registers\n");
+
+	err = twl4030_i2c_read(TWL4030_MODULE_INTBR, (u8 *)(&twl4030_rev), 0x0, 4);
+	if (err)
+		pr_err("TWL4030: unable to read IDCODE-%d\n", err);
+
+	err = twl4030_i2c_write_u8(TWL4030_MODULE_INTBR, 0x0, R_UNLOCK_TEST_REG);
+	if (err)
+		pr_err("TWL4030 Unable to relock IDCODE registers\n");
+}
+
+bool twl_rev_is_tps65921(void)
+{
+	if (twl4030_rev == 0)
+		twl4030_load_rev();
+
+	return TWL_SIL_TYPE(twl4030_rev) == TWL_SIL_TPS65921;
+}
+
 void __init twl4030_power_init(struct twl4030_power_data *triton2_scripts)
 {
 	int err = 0;
@@ -408,8 +543,9 @@ void __init twl4030_power_init(struct twl4030_power_data *triton2_scripts)
 			resconfig++;
 		}
 	}
-
 	if (twl4030_i2c_write_u8(TWL4030_MODULE_PM_MASTER, 0, R_PROTECT_KEY))
 		printk(KERN_ERR
 			"TWL4030 Unable to relock registers\n");
+
+	return;
 }

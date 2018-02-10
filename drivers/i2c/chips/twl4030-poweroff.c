@@ -37,6 +37,10 @@ static void twl4030_poweroff(void)
 	u8 uninitialized_var(val);
 	int err;
 
+	err = twl4030_add_sleep_script();
+	if (err)
+		pr_err("twl4030: error trying to enable sleep script!\n");
+
 	/* Make sure SEQ_OFFSYNC is set so that all the res goes to wait-on */
 	err = twl4030_i2c_read_u8(TWL4030_MODULE_PM_MASTER, &val,
 				   CFG_P123_TRANSITION);
@@ -76,7 +80,6 @@ static void twl4030_poweroff(void)
 static int __init twl4030_poweroff_init(void)
 {
 	pm_power_off = twl4030_poweroff;
-
 	return 0;
 }
 

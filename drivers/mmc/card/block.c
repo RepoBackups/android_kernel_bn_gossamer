@@ -35,6 +35,7 @@
 #include <linux/mmc/host.h>
 #include <linux/mmc/mmc.h>
 #include <linux/mmc/sd.h>
+#include <linux/mmc/mmc_log.h>
 
 #include <asm/system.h>
 #include <asm/uaccess.h>
@@ -44,9 +45,10 @@
 MODULE_ALIAS("mmc:block");
 
 /*
- * max 8 partitions per card
+ * max 16 partitions per card
  */
-#define MMC_SHIFT	3
+//#define MMC_SHIFT	3
+#define MMC_SHIFT	4
 #define MMC_NUM_MINORS	(256 >> MMC_SHIFT)
 
 static DECLARE_BITMAP(dev_use, MMC_NUM_MINORS);
@@ -85,7 +87,14 @@ static void mmc_blk_put(struct mmc_blk_data *md)
 	mutex_lock(&open_lock);
 	md->usage--;
 	if (md->usage == 0) {
+		int devmaj = MAJOR(disk_devt(md->disk));
 		int devidx = MINOR(disk_devt(md->disk)) >> MMC_SHIFT;
+
+		if (!devmaj)
+			devidx = md->disk->first_minor >> MMC_SHIFT;
+
+		blk_cleanup_queue(md->queue.queue);
+
 		__clear_bit(devidx, dev_use);
 
 		put_disk(md->disk);
@@ -211,8 +220,9 @@ static u32 mmc_sd_num_wr_blocks(struct mmc_card *card)
 	result = ntohl(*blocks);
 	kfree(blocks);
 
-	if (cmd.error || data.error)
+	if (cmd.error || data.error) {
 		result = (u32)-1;
+	}
 
 	return result;
 }
@@ -338,6 +348,8 @@ static int mmc_blk_issue_rq(struct mmc_queue *mq, struct request *req)
 
 		brq.data.sg = mq->sg;
 		brq.data.sg_len = mmc_queue_map_sg(mq);
+
+        mmc_log_transaction((READ == rq_data_dir(req)) ? MMC_OP_READ : MMC_OP_WRITE, brq.cmd.arg, brq.data.blocks);
 
 		/*
 		 * Adjust the sg list so it is the same size as the
@@ -495,6 +507,10 @@ static int mmc_blk_issue_rq(struct mmc_queue *mq, struct request *req)
 		ret = __blk_end_request(req, -EIO, blk_rq_cur_bytes(req));
 	spin_unlock_irq(&md->lock);
 
+#ifdef CONFIG_MMC_PANIC_ERR
+	BUG();
+#endif
+
 	return 0;
 }
 
@@ -626,6 +642,7 @@ static int mmc_blk_probe(struct mmc_card *card)
 	return 0;
 
  out:
+	mmc_cleanup_queue(&md->queue);
 	mmc_blk_put(md);
 
 	return err;

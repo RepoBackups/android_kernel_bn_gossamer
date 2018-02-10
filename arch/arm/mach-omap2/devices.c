@@ -616,13 +616,18 @@ static inline void omap2_mmc_mux(struct omap_mmc_platform_data *mmc_controller,
 	}
 }
 
+#ifdef CONFIG_MMC_OMAP_CONSISTENT_NAMES
+#define FIRST_CONTROLLER 1
+#else
+#define FIRST_CONTROLLER 0
+#endif
+
 void __init omap2_init_mmc(struct omap_mmc_platform_data **mmc_data,
 			int nr_controllers)
 {
 	int i;
 	char *name;
-
-	for (i = 0; i < nr_controllers; i++) {
+	for (i = FIRST_CONTROLLER; i < nr_controllers; i++) {
 		unsigned long base, size;
 		unsigned int irq = 0;
 
@@ -660,7 +665,20 @@ void __init omap2_init_mmc(struct omap_mmc_platform_data **mmc_data,
 			else
 				name = "mmci-omap-hs";
 		}
+
 		omap_mmc_add(name, i, base, size, irq, mmc_data[i]);
+
+#ifdef CONFIG_MMC_OMAP_CONSISTENT_NAMES
+		if(1==i)
+		{
+		  printk(KERN_ERR "SD/MMC devices, enumerating first eMMC.\n");
+		  i-=2;
+		}
+		else if(0==i){
+		  printk(KERN_ERR "SD/MMC devices, checking for SD card devices attached.\n");
+		  i++;
+		}
+#endif
 	};
 }
 

@@ -291,6 +291,50 @@ static int pm_dbg_show_regs(struct seq_file *s, void *unused)
 
 	return 0;
 }
+void pm_dbg_print(int reg_set)
+{
+	int i, j;
+	unsigned long val;
+	u32 *ptr;
+	int regs;
+	int linefeed;
+
+	ptr = pm_dbg_reg_set[reg_set - 1];
+	
+	i = 0;
+
+	while (pm_dbg_reg_modules[i].name[0] != 0) {
+		regs = 0;
+		linefeed = 0;
+		if (pm_dbg_reg_modules[i].type == MOD_CM)
+			printk("MOD: CM_%s (%08x)\n",
+				pm_dbg_reg_modules[i].name,
+				(u32)(OMAP2_CM_BASE +
+				pm_dbg_reg_modules[i].offset));
+		else
+			printk("MOD: PRM_%s (%08x)\n",
+				pm_dbg_reg_modules[i].name,
+				(u32)(OMAP2_PRM_BASE +
+				pm_dbg_reg_modules[i].offset));
+
+		for (j = pm_dbg_reg_modules[i].low;
+			j <= pm_dbg_reg_modules[i].high; j += 4) {
+			val = *(ptr++);
+			if (val != 0) {
+				regs++;
+				if (linefeed) {
+					printk("\n");
+					linefeed = 0;
+				}
+				printk("  %02x => %08lx", j, val);
+				if (regs % 4 == 0)
+					linefeed = 1;
+			}
+		}
+		printk("\n");
+		i++;
+	}
+}
 
 static void pm_dbg_regset_store(u32 *ptr)
 {

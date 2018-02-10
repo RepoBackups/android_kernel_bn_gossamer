@@ -351,7 +351,93 @@ static ssize_t display_device_connected_show(struct device *dev,
 	return snprintf(buf, PAGE_SIZE, "%d\n", device_connected);
 }
 
+#define GAMMA_BLUE_SHIFT    (0)
+#define GAMMA_GREEN_SHIFT   (8)
+#define GAMMA_RED_SHIFT     (16)
 
+static ssize_t display_gamma_common_show(struct device *dev,
+        struct device_attribute *attr, char *buf, u32 shift)
+{
+    struct omap_dss_device *dssdev = to_dss_device(dev);
+    char *orig_buf = buf;
+    u32 *vaddr_clut = (u32 *) dss_get_clut_virt();
+    int i;
+
+    if (dssdev->clut_size / sizeof(u32) > 256) {
+        dev_err(dev, "clut_size for dssdev is invalid!\n");
+        return -EINVAL;
+    }
+    
+    for (i = 0; i < (dssdev->clut_size / sizeof(u32)); ++i) {
+        buf += sprintf(buf, "%u ", ((*vaddr_clut >> shift) & 0xff) - i);
+        vaddr_clut++;
+    }
+
+    buf += sprintf(buf, "\n");
+
+    return (buf - orig_buf);
+}
+
+static ssize_t display_gamma_common_store(struct device *dev, struct device_attribute *attr,
+		const char *buf, size_t count, u32 shift)
+{
+    struct omap_dss_device *dssdev = to_dss_device(dev);
+    u32 *vaddr_clut = (u32 *) dss_get_clut_virt();
+    char *buf_ptr = (char *) buf;
+    u32 i;
+
+    for (i = 0;
+         i < (dssdev->clut_size / sizeof(u32)) && ((buf_ptr - buf) < count);
+         ++i) {
+        u32 temp = (simple_strtoul(buf_ptr, &buf_ptr, 10)) + i;
+        // clamp temp to 0xff
+        temp = min(temp, 255u);
+        ++buf_ptr; // skip trailing ' '
+        *vaddr_clut &= ~(0xff << shift);
+        *vaddr_clut |= (temp << shift);
+        vaddr_clut++;
+    }
+
+    dss_setup_clut();
+
+    return (buf_ptr - buf);
+}
+
+static ssize_t display_gamma_blue_show(struct device *dev, 
+        struct device_attribute *attr, char *buf)
+{
+    return display_gamma_common_show(dev, attr, buf, GAMMA_BLUE_SHIFT);
+}
+
+static ssize_t display_gamma_blue_store(struct device *dev, struct device_attribute *attr,
+		const char *buf, size_t count)
+{
+    return display_gamma_common_store(dev, attr, buf, count, GAMMA_BLUE_SHIFT);
+}
+
+static ssize_t display_gamma_red_show(struct device *dev,
+                struct device_attribute *attr, char *buf)
+{
+    return display_gamma_common_show(dev, attr, buf, GAMMA_RED_SHIFT);
+}
+
+static ssize_t display_gamma_red_store(struct device *dev, struct device_attribute *attr,
+                const char *buf, size_t count)
+{
+    return display_gamma_common_store(dev, attr, buf, count, GAMMA_RED_SHIFT);
+}
+
+static ssize_t display_gamma_green_show(struct device *dev,
+                struct device_attribute *attr, char *buf)
+{
+    return display_gamma_common_show(dev, attr, buf, GAMMA_GREEN_SHIFT);
+}
+
+static ssize_t display_gamma_green_store(struct device *dev, struct device_attribute *attr,
+                const char *buf, size_t count)
+{
+    return display_gamma_common_store(dev, attr, buf, count, GAMMA_GREEN_SHIFT);
+}
 
 static DEVICE_ATTR(enabled, S_IRUGO|S_IWUSR,
 		display_enabled_show, display_enabled_store);
@@ -375,6 +461,15 @@ static DEVICE_ATTR(device_detect_enabled, S_IRUGO|S_IWUSR,
 static DEVICE_ATTR(device_connected, S_IRUGO,
 		display_device_connected_show,
 		NULL);
+static DEVICE_ATTR(gamma_blue, S_IRUGO | S_IWUSR,
+        display_gamma_blue_show,
+        display_gamma_blue_store);
+static DEVICE_ATTR(gamma_green, S_IRUGO | S_IWUSR,
+        display_gamma_green_show,
+        display_gamma_green_store);
+static DEVICE_ATTR(gamma_red, S_IRUGO | S_IWUSR,
+        display_gamma_red_show,
+        display_gamma_red_store);
 
 static struct device_attribute *display_sysfs_attrs[] = {
 	&dev_attr_enabled,
@@ -387,6 +482,9 @@ static struct device_attribute *display_sysfs_attrs[] = {
 	&dev_attr_lpr_enable,
 	&dev_attr_device_detect_enabled,
 	&dev_attr_device_connected,
+    &dev_attr_gamma_blue,
+    &dev_attr_gamma_green,
+    &dev_attr_gamma_red,
 	NULL
 };
 

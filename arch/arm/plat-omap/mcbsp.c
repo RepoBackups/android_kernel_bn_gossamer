@@ -99,6 +99,7 @@ static irqreturn_t omap_mcbsp_tx_irq_handler(int irq, void *dev_id)
 	if (irqst_spcr2 & XSYNC_ERR) {
 		dev_err(mcbsp_tx->dev, "TX Frame Sync Error! : 0x%x\n",
 			irqst_spcr2);
+
 		/* Writing zero to XSYNC_ERR clears the IRQ */
 		OMAP_MCBSP_WRITE(mcbsp_tx->io_base, SPCR2,
 			irqst_spcr2 & ~(XSYNC_ERR));
@@ -156,6 +157,42 @@ static void omap_mcbsp_rx_dma_callback(int lch, u16 ch_status, void *data)
 	mcbsp_dma_rx->dma_rx_lch = -1;
 
 	complete(&mcbsp_dma_rx->rx_dma_completion);
+}
+
+/**
+  * Debug function for getting the pending operation status
+  * for a serial channel. 
+  */
+
+unsigned int omap_mcbsp_pending_status(unsigned int id)
+{
+	struct omap_mcbsp *mcbsp;
+    unsigned int result = 0;
+
+	if (!omap_mcbsp_check_valid_id(id)) {
+		printk(KERN_ERR "%s: Invalid id (%d)\n", __func__, id + 1);
+		return 0;
+	}
+
+    mcbsp = id_to_mcbsp_ptr(id);
+
+    if (completion_done(&mcbsp->tx_irq_completion)) {
+        result |= 0x1;
+    }
+
+    if (completion_done(&mcbsp->rx_irq_completion)) {
+        result |= 0x2;
+    }
+
+    if (completion_done(&mcbsp->tx_dma_completion)) {
+        result |= 0x4;
+    }
+
+    if (completion_done(&mcbsp->rx_dma_completion)) {
+        result |= 0x8;
+    }
+
+    return result;
 }
 
 /*
@@ -611,9 +648,9 @@ void omap_mcbsp_xmit_word(unsigned int id, u32 word)
 
 	wait_for_completion(&mcbsp->tx_irq_completion);
 
-	if (word_length > OMAP_MCBSP_WORD_16)
-		OMAP_MCBSP_WRITE(io_base, DXR2, word >> 16);
-	OMAP_MCBSP_WRITE(io_base, DXR1, word & 0xffff);
+    if (word_length > OMAP_MCBSP_WORD_16)
+	   	OMAP_MCBSP_WRITE(io_base, DXR2, word >> 16);
+    OMAP_MCBSP_WRITE(io_base, DXR1, word & 0xffff);
 }
 EXPORT_SYMBOL(omap_mcbsp_xmit_word);
 

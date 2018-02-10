@@ -116,7 +116,9 @@ static int update_resource_level(struct shared_resource *resp)
 				max_constraint = user->level;
 
 		resp = resource_lookup("vdd1_opp");
+		mutex_lock(&resp->resource_mutex);
 		ret = update_resource_level(resp);
+		mutex_unlock(&resp->resource_mutex);
 
 		return ret;
 
@@ -152,6 +154,8 @@ static int update_resource_level(struct shared_resource *resp)
 	return ret;
 }
 
+DECLARE_MUTEX(static_resource_useralloc_lock);
+
 /**
  * get_user - gets a new users_list struct from static pool or dynamically
  *
@@ -165,7 +169,19 @@ static int update_resource_level(struct shared_resource *resp)
 static struct users_list *get_user(void)
 {
 	int ind = 0;
-	struct users_list *user;
+	struct users_list *user = 0;
+
+	/* Guard the static pool allocation. Calls to get_user() used to be
+	 * guarded by res_mutex. Now it is guarded by a per-resource mutex.
+	 * That's why additional locking is needed to prevent the race
+	 * between requests to two different resources. Sequence of race:
+	 * 	- Find a free slot in the static pool - RESOURCE 1
+	 * 	- Find a free slot in the static pool - RESOURCE 2
+	 * 	- Mark slot as used - RESOURCE 1
+	 * 	- Mark slot as used - RESOURCE 2
+	 * The same slot will be used by the two resource users.
+	 */
+	down(&static_resource_useralloc_lock);
 
 	/* See if something available in the static pool */
 	while (ind < MAX_USERS) {
@@ -178,7 +194,11 @@ static struct users_list *get_user(void)
 		/* Pick from the static pool */
 		user = &usr_list[ind];
 		user->usage = STATIC_ALLOC;
-	} else {
+	}
+
+	up(&static_resource_useralloc_lock);
+
+	if (!user) {
 		/* By this time we hope slab is initialized */
 		if (slab_is_available()) {
 			user = kmalloc(sizeof(struct  users_list), GFP_KERNEL);
@@ -211,8 +231,10 @@ void free_user(struct users_list *user)
 	if (user->usage == DYNAMIC_ALLOC) {
 		kfree(user);
 	} else {
+		down(&static_resource_useralloc_lock);
 		user->usage = UNUSED;
 		user->dev = NULL;
+		up(&static_resource_useralloc_lock);
 	}
 }
 
@@ -263,7 +285,11 @@ int resource_refresh(void)
 	int ret = 0;
 
 	list_for_each_entry(resp, &res_list, node) {
+		mutex_lock(&resp->resource_mutex);
 		ret = update_resource_level(resp);
+
+		mutex_unlock(&resp->resource_mutex);
+
 		if (ret)
 			break;
 	}

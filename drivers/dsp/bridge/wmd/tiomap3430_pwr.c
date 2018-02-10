@@ -118,6 +118,7 @@ DSP_STATUS handle_hibernation_fromDSP(struct WMD_DEV_CONTEXT *pDevContext)
 				omap_dspbridge_dev->dev.platform_data;
 #endif
 	DEFINE_SPINLOCK(lock);
+	DEFINE_SPINLOCK(irq_lock);
 
 	prev_state = pDevContext->dwBrdState;
 	pDevContext->dwBrdState = BRD_SLEEP_TRANSITION;
@@ -152,10 +153,18 @@ DSP_STATUS handle_hibernation_fromDSP(struct WMD_DEV_CONTEXT *pDevContext)
 			status = DSP_EFAIL;
 			goto func_cont;
 		}
-		/* Update the Bridger Driver state */
+
+		/* 
+		 * First make sure interrupts are disabled so we
+		 * don't save a partial state.
+		 */
+		spin_lock_irq(&irq_lock);
+		/* Update the dsp state to hibernate */
 		pDevContext->dwBrdState = BRD_DSP_HIBERNATION;
 		/* Save mailbox settings */
 		omap_mbox_save_ctx(pDevContext->mbox);
+		/* Re-enable interrupts */
+		spin_unlock_irq(&irq_lock);
 
 		/* Turn off DSP Peripheral clocks and DSP Load monitor timer */
 		status = DSP_PeripheralClocks_Disable(pDevContext, NULL);
@@ -168,6 +177,7 @@ DSP_STATUS handle_hibernation_fromDSP(struct WMD_DEV_CONTEXT *pDevContext)
 #endif
 func_cont:
 		spin_unlock_bh(&lock);
+
 #ifdef CONFIG_BRIDGE_DVFS
 		if (DSP_SUCCEEDED(status)) {
 			DEV_GetIOMgr(pDevContext->hDevObject, &hIOMgr);
@@ -289,12 +299,6 @@ DSP_STATUS SleepDSP(struct WMD_DEV_CONTEXT *pDevContext, IN u32 dwCmd,
 			status = DSP_EFAIL;
 			goto func_cont;
 		}
-		/* Update the Bridger Driver state */
-		if (enable_off_mode)
-			pDevContext->dwBrdState = BRD_HIBERNATION;
-		else
-			pDevContext->dwBrdState = BRD_RETENTION;
-
 		/* Turn off DSP Peripheral clocks  */
 		status = DSP_PeripheralClocks_Disable(pDevContext, NULL);
 #ifdef CONFIG_BRIDGE_WDT3
@@ -307,6 +311,16 @@ DSP_STATUS SleepDSP(struct WMD_DEV_CONTEXT *pDevContext, IN u32 dwCmd,
 #endif
 func_cont:
 		spin_unlock_bh(&lock);
+
+		/* Update the Bridge Driver state
+		 * after spin_unlock_bh(). Otherwise
+		 * clocks get enabled.
+		 */
+		if (enable_off_mode)
+			pDevContext->dwBrdState = BRD_HIBERNATION;
+		else
+			pDevContext->dwBrdState = BRD_RETENTION;
+
 		if (DSP_FAILED(status)) {
 			return status;
 		}

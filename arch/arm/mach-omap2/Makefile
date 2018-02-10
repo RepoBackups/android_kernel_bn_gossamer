@@ -49,6 +49,9 @@ iommu-$(CONFIG_ARCH_OMAP3)		+= omap3-iommu.o
 
 obj-$(CONFIG_OMAP_IOMMU)		+= $(iommu-y)
 
+# L3 interconnect
+obj-$(CONFIG_ARCH_OMAP3)		+= omap_l3_smx.o
+
 # Specific board support
 obj-$(CONFIG_MACH_OMAP_GENERIC)		+= board-generic.o
 obj-$(CONFIG_MACH_OMAP_H4)		+= board-h4.o board-h4-mmc.o
@@ -81,6 +84,26 @@ obj-$(CONFIG_MACH_OMAP_ZOOM3)		+= board-zoom2.o \
 					   board-zoom2-camera.o \
 					   board-connectivity.o \
 					   board-zoom2-wifi.o
+obj-$(CONFIG_MACH_OMAP3630_EDP1)	+= board-3630_edp1.o \
+					   mmc-twl4030.o \
+					   board-ldp-flash.o \
+					   board-edp1-wifi.o
+obj-$(CONFIG_MACH_OMAP3621_EDP1)	+= board-3630_edp1.o \
+					   mmc-twl4030.o \
+					   board-ldp-flash.o \
+					   board-edp1-wifi.o
+obj-$(CONFIG_MACH_OMAP3621_BOXER)	+= board-3621_boxer.o \
+					   mmc-twl4030.o \
+					   board-ldp-flash.o \
+					   board-boxer-wifi.o
+obj-$(CONFIG_MACH_OMAP3621_EVT1A)	+= board-3621_evt1a.o \
+					   mmc-twl4030.o \
+					   board-ldp-flash.o \
+					   board-boxer-wifi.o
+obj-$(CONFIG_MACH_OMAP3621_GOSSAMER)	+= board-3621_gossamer.o \
+					   mmc-twl4030.o \
+					   board-ldp-flash.o \
+					   board-gossamer-wifi.o
 obj-$(CONFIG_MACH_OMAP_3630SDP)		+= board-3630sdp.o \
 					   mmc-twl4030.o
 obj-$(CONFIG_MACH_OMAP_APOLLON)		+= board-apollon.o \

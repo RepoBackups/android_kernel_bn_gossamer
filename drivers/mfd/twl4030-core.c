@@ -160,6 +160,8 @@
 /* Few power values */
 #define R_CFG_BOOT			0x05
 #define R_PROTECT_KEY			0x0E
+#define R_CFG_PWRANA2			0x09
+#define VRRTC_SLEEP			BIT(6)
 
 /* access control values for R_PROTECT_KEY */
 #define KEY_UNLOCK1			0xce
@@ -176,7 +178,7 @@
 /* chip-specific feature flags, for i2c_device_id.driver_data */
 #define TWL4030_VAUX2		BIT(0)	/* pre-5030 voltage ranges */
 #define TPS_SUBSET		BIT(1)	/* tps659[23]0 have fewer LDOs */
-
+#define	TPS_65921		BIT(2)	/* w/o vmmc2 */
 /*----------------------------------------------------------------------*/
 
 /* is driver active, bound to a chip? */
@@ -237,7 +239,7 @@ static struct twl4030mapping twl4030_map[TWL4030_MODULE_LAST + 1] = {
 	{ 3, TWL4030_BASEADD_SECURED_REG },
 };
 
-extern void twl4030_power_init(struct twl4030_power_data *triton2_scripts);
+extern void __init twl4030_power_init(struct twl4030_power_data *triton2_scripts);
 
 /*----------------------------------------------------------------------*/
 
@@ -472,7 +474,7 @@ add_regulator(int num, struct regulator_init_data *pdata)
  * that's how twl_init_irq() sets things up.
  */
 
-static int
+static int __init
 add_children(struct twl4030_platform_data *pdata, unsigned long features)
 {
 	struct device	*child;
@@ -543,6 +545,13 @@ add_children(struct twl4030_platform_data *pdata, unsigned long features)
 	if (twl_has_pwrbutton()) {
 		child = add_child(1, "twl4030_pwrbutton",
 				NULL, 0, true, pdata->irq_base + 8 + 0, 0);
+		if (IS_ERR(child))
+			return PTR_ERR(child);
+	}
+
+	/* Add vmmc2 that is not present on 65921 power */
+	if (features & TPS_65921) {
+		child = add_regulator(TWL4030_REG_VMMC2, pdata->vmmc2);
 		if (IS_ERR(child))
 			return PTR_ERR(child);
 	}
@@ -750,7 +759,7 @@ static int twl4030_remove(struct i2c_client *client)
 }
 
 /* NOTE:  this driver only handles a single twl4030/tps659x0 chip */
-static int
+static int __init
 twl4030_probe(struct i2c_client *client, const struct i2c_device_id *id)
 {
 	int				status;
@@ -799,8 +808,18 @@ twl4030_probe(struct i2c_client *client, const struct i2c_device_id *id)
 	clocks_init(&client->dev);
 
 	/* load power event scripts */
-	if (twl_has_power() && pdata->power)
+	if (twl_has_power() && pdata->power) {
 		twl4030_power_init(pdata->power);
+                 /*
+                  * PRCM on OMAP3 will drive SYS_OFFMODE low during DPLL3 warm reset.
+                  * This causes Gaia sleep script to execute, usually killing VDD1 and
+                  * VDD2 while code is running.  WA is to disable the sleep script
+                  * at all times and the re-enable it during power off and suspend.
+                  *
+                  */
+
+                twl4030_remove_script(TRITON_SLEEP_SCRIPT);
+        }
 
 	/* Maybe init the T2 Interrupt subsystem */
 	if (client->irq
@@ -821,11 +840,40 @@ twl4030_probe(struct i2c_client *client, const struct i2c_device_id *id)
 				I2C_SDA_CTRL_PU | I2C_SCL_CTRL_PU);
 	twl4030_i2c_write_u8(TWL4030_MODULE_INTBR, temp, REG_GPPUPDCTR1);
 
+#if defined(CONFIG_MACH_OMAP3621_GOSSAMER)
+	/* put VRTC to sleep */
+	twl4030_i2c_read_u8(TWL4030_MODULE_PM_MASTER, &temp, R_CFG_PWRANA2);
+	temp |= VRRTC_SLEEP;
+	twl4030_i2c_write_u8(TWL4030_MODULE_PM_MASTER, temp, R_CFG_PWRANA2);
+#endif
+
 	status = add_children(pdata, id->driver_data);
 fail:
 	if (status < 0)
 		twl4030_remove(client);
 	return status;
+}
+
+static int twl4030_suspend(struct i2c_client *client, pm_message_t msg) 
+{
+    /*
+     * Before we go into suspend re-enable the sleep script
+     * this is a little bit dangerous in case the kernel crashes
+     * after this and before resume happens.
+     *
+     * The device won't reboot and instead be stuck in 'limbo'
+     * forcing a manual 8s press hard reset
+     */
+    return twl4030_add_sleep_script();
+}
+
+static int twl4030_resume(struct i2c_client *client)
+{
+    /*
+     * Remove the sleep script again to make sure we 
+     * can restart in case of kernel panic
+     */
+    return twl4030_remove_script(TRITON_SLEEP_SCRIPT);
 }
 
 static const struct i2c_device_id twl4030_ids[] = {
@@ -834,6 +882,7 @@ static const struct i2c_device_id twl4030_ids[] = {
 	{ "tps65950", 0 },		/* catalog version of twl5030 */
 	{ "tps65930", TPS_SUBSET },	/* fewer LDOs and DACs; no charger */
 	{ "tps65920", TPS_SUBSET },	/* fewer LDOs; no codec or charger */
+	{ "tps65921", TPS_SUBSET | TPS_65921 },	/* w/o vmmc2 */
 	{ /* end of list */ },
 };
 MODULE_DEVICE_TABLE(i2c, twl4030_ids);
@@ -843,6 +892,8 @@ static struct i2c_driver twl4030_driver = {
 	.driver.name	= DRIVER_NAME,
 	.id_table	= twl4030_ids,
 	.probe		= twl4030_probe,
+        .suspend        = twl4030_suspend,
+        .resume         = twl4030_resume,
 	.remove		= twl4030_remove,
 };
 

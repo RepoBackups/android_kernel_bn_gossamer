@@ -37,6 +37,7 @@ static int try_to_freeze_tasks(bool sig_only)
 	struct timeval start, end;
 	u64 elapsed_csecs64;
 	unsigned int elapsed_csecs;
+    long wl_timeout;
 	unsigned int wakeup = 0;
 
 	do_gettimeofday(&start);
@@ -64,12 +65,16 @@ static int try_to_freeze_tasks(bool sig_only)
 		} while_each_thread(g, p);
 		read_unlock(&tasklist_lock);
 		yield();			/* Yield is okay here */
-		if (todo && has_wake_lock(WAKE_LOCK_SUSPEND)) {
+        wl_timeout = has_wake_lock_debug(WAKE_LOCK_SUSPEND);
+		if (todo && wl_timeout) {
+            printk(KERN_ERR "Suspend prevented for %ld jiffies\n", wl_timeout);
 			wakeup = 1;
 			break;
 		}
-		if (time_after(jiffies, end_time))
+		if (time_after(jiffies, end_time)) {
+            printk(KERN_ERR "Suspend attempts timed out\n");
 			break;
+        }
 	} while (todo);
 
 	do_gettimeofday(&end);

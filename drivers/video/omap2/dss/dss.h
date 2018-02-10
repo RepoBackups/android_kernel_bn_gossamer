@@ -165,6 +165,11 @@ int dss_need_ctx_restore(void);
 void dss_dump_clocks(struct seq_file *s);
 struct bus_type *dss_get_bus(void);
 
+// Returns the virtual address of the CLUT
+void * dss_get_clut_virt(void);
+// Sets up the CLUT 
+void dss_setup_clut(void);
+
 /* display */
 int dss_suspend_all_devices(void);
 int dss_resume_all_devices(void);
@@ -335,6 +340,7 @@ int dispc_calc_clock_div(bool is_tft, unsigned long req_pck,
 int dispc_set_clock_div(struct dispc_clock_info *cinfo);
 int dispc_get_clock_div(struct dispc_clock_info *cinfo);
 void dispc_set_lcd_divisor(u16 lck_div, u16 pck_div);
+int dispc_setup_clut(u32 phy);
 
 
 /* VENC */

@@ -459,6 +459,39 @@ static int __devexit twl4030_kp_remove(struct platform_device *pdev)
 	return 0;
 }
 
+static int twl4030_kp_resume(struct platform_device * pdev)
+{
+	int ret;
+	u8 reg;
+	struct twl4030_keypad *kp = platform_get_drvdata(pdev);
+
+	ret = twl4030_kpread(kp, &reg, KEYP_CTRL, 1);
+	if (ret != 0)
+		return -EIO;
+
+	reg |= KEYP_CTRL_KBD_ON;
+	ret = twl4030_kpwrite_u8(kp, reg, KEYP_CTRL);
+
+	return ret;
+}
+
+static int twl4030_kp_suspend(struct platform_device * pdev, pm_message_t state)
+{
+	int ret;
+	u8 reg;
+	struct twl4030_keypad *kp = platform_get_drvdata(pdev);
+
+	/* free the 32Khz clock and disable keypad */
+	ret = twl4030_kpread(kp, &reg, KEYP_CTRL, 1);
+	if (ret != 0)
+		return -EIO;
+
+	reg &= ~KEYP_CTRL_KBD_ON;
+	ret = twl4030_kpwrite_u8(kp, reg, KEYP_CTRL);
+
+	return ret;
+}
+
 /*
  * NOTE: twl4030 are multi-function devices connected via I2C.
  * So this device is a child of an I2C parent, thus it needs to
@@ -474,6 +507,8 @@ static struct platform_driver twl4030_kp_driver = {
 		.name	= "twl4030_keypad",
 		.owner	= THIS_MODULE,
 	},
+	.suspend	= twl4030_kp_suspend,
+	.resume		= twl4030_kp_resume,
 };
 
 static int __init twl4030_kp_init(void)

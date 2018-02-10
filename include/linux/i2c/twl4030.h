@@ -238,6 +238,7 @@ int twl4030_i2c_read(u8 mod_no, u8 *value, u8 reg, unsigned num_bytes);
 #define DEV_GRP_P1		0x1
 #define DEV_GRP_P2		0x2
 #define DEV_GRP_P3		0x4
+#define DEV_GRP_ALL		0x7     /* P1/P2/P3: all devices */
 
 #define RES_GRP_RES		0x0
 #define RES_GRP_PP		0x1
@@ -249,6 +250,10 @@ int twl4030_i2c_read(u8 mod_no, u8 *value, u8 reg, unsigned num_bytes);
 #define RES_GRP_ALL		0x7
 
 #define RES_TYPE2_R0		0x0
+#define RES_TYPE2_R1		0x1
+#define RES_TYPE2_R2		0x2
+
+#define RES_TYPE_R0		0x0
 
 #define RES_TYPE_ALL		0x7
 
@@ -288,6 +293,7 @@ int twl4030_i2c_read(u8 mod_no, u8 *value, u8 reg, unsigned num_bytes);
 #define RES_RESET               27
 #define RES_Main_Ref            28
 
+#define TOTAL_RESOURCES		28
 /*
  * Power Bus Message Format ... these can be sent individually by Linux,
  * but are usually part of downloaded scripts that are run when various
@@ -307,6 +313,13 @@ int twl4030_i2c_read(u8 mod_no, u8 *value, u8 reg, unsigned num_bytes);
 
 #define MSG_SINGULAR(devgrp, id, state) \
 	((devgrp) << 13 | 0 << 12 | (id) << 4 | (state))
+
+#define MSG_BROADCAST_ALL(devgrp, state) \
+	((devgrp) << 5 | (state))
+
+#define MSG_BROADCAST_REF MSG_BROADCAST_ALL
+#define MSG_BROADCAST_PROV MSG_BROADCAST_ALL
+#define MSG_BROADCAST__CLK_RST MSG_BROADCAST_ALL
 
 /*----------------------------------------------------------------------*/
 
@@ -371,6 +384,7 @@ enum twl4030_usb_mode {
 
 struct twl4030_usb_data {
 	enum twl4030_usb_mode	usb_mode;
+	struct regulator_consumer_supply *bci_supply;
 };
 
 struct twl4030_ins {
@@ -393,14 +407,20 @@ struct twl4030_resconfig {
 	u8 devgroup;
 	u8 type;
 	u8 type2;
+	u8 remap_off;	/* off state remapping */
+	u8 remap_sleep;	/* sleep state remapping */
 };
 
 struct twl4030_power_data {
 	struct twl4030_script **scripts;
 	unsigned size;
 	const struct twl4030_resconfig *resource_config;
+#define TWL4030_RESCONFIG_UNDEF ((u8)-1)
 };
 
+extern bool twl_rev_is_tps65921(void);
+
+extern int twl4030_add_sleep_script(void);
 extern int twl4030_remove_script(u8 flags);
 
 struct twl4030_platform_data {

@@ -591,6 +591,9 @@ int omap_mcbsp_dai_suspend(struct snd_soc_dai *cpu_dai)
 {
 	struct omap_mcbsp_data *mcbsp_data = to_mcbsp(cpu_dai->private_data);
 
+    printk(KERN_INFO "%s: cpu_dai->active: %d mcbsp pending: 0x%x\n", 
+           __FUNCTION__, cpu_dai->active, omap_mcbsp_pending_status(mcbsp_data->bus_id));
+
 	if (cpu_dai->active) {
 		omap_mcbsp_dai_set_clks_src(mcbsp_data, OMAP_MCBSP_SYSCLK_CLKS_FCLK);
 		omap_mcbsp_disable_fclk(mcbsp_data->bus_id);
@@ -602,6 +605,9 @@ int omap_mcbsp_dai_suspend(struct snd_soc_dai *cpu_dai)
 int omap_mcbsp_dai_resume(struct snd_soc_dai *cpu_dai)
 {
 	struct omap_mcbsp_data *mcbsp_data = to_mcbsp(cpu_dai->private_data);
+
+    printk(KERN_INFO "%s: cpu_dai->active: %d mcbsp pending: 0%x\n", 
+           __FUNCTION__, cpu_dai->active, omap_mcbsp_pending_status(mcbsp_data->bus_id));
 
 	if (cpu_dai->active) {
 		omap_mcbsp_enable_fclk(mcbsp_data->bus_id);

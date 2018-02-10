@@ -369,6 +369,7 @@ arch_initcall(omap_init_fb);
 
 #else
 
+#if !(defined(CONFIG_FB_OMAP3EP) || defined(CONFIG_FB_OMAP3EP_MODULE))
 void omapfb_reserve_sdram(void) {}
 unsigned long omapfb_reserve_sram(unsigned long sram_pstart,
 				  unsigned long sram_vstart,
@@ -378,6 +379,7 @@ unsigned long omapfb_reserve_sram(unsigned long sram_pstart,
 {
 	return 0;
 }
+#endif
 
 
 #endif

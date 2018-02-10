@@ -308,6 +308,16 @@ static int twl4030ldo_get_voltage(struct regulator_dev *rdev)
 	return LDO_MV(info->table[vsel]) * 1000;
 }
 
+static int twl4030_set_suspend_enable(struct regulator_dev *rdev)
+{
+	return 0;
+}
+
+static int twl4030_set_suspend_disable(struct regulator_dev *rdev)
+{
+	return 0;
+}
+
 static struct regulator_ops twl4030ldo_ops = {
 	.list_voltage	= twl4030ldo_list_voltage,
 
@@ -321,6 +331,8 @@ static struct regulator_ops twl4030ldo_ops = {
 	.set_mode	= twl4030reg_set_mode,
 
 	.get_status	= twl4030reg_get_status,
+	.set_suspend_enable	= twl4030_set_suspend_enable,
+	.set_suspend_disable	= twl4030_set_suspend_disable,
 };
 
 /*----------------------------------------------------------------------*/
@@ -354,6 +366,9 @@ static struct regulator_ops twl4030fixed_ops = {
 	.set_mode	= twl4030reg_set_mode,
 
 	.get_status	= twl4030reg_get_status,
+
+	.set_suspend_enable	= twl4030_set_suspend_enable,
+	.set_suspend_disable	= twl4030_set_suspend_disable,
 };
 
 /*----------------------------------------------------------------------*/

@@ -619,6 +619,9 @@ omap_i2c_xfer(struct i2c_adapter *adap, struct i2c_msg msgs[], int num)
 
 	if (r == 0)
 		r = num;
+
+	omap_i2c_wait_for_bb(dev);
+
 out:
 	omap_i2c_idle(dev);
 	return r;
@@ -758,10 +761,24 @@ complete:
 			 * RDR could be set when the bus is busy, then
 			 * ignore the interrupt, and clear the bit.
 			 */
-			u8 stat2 = 0;
-			stat2 = omap_i2c_read_reg(dev, OMAP_I2C_STAT_REG);
-			if (stat2 & OMAP_I2C_STAT_BB)
-				return IRQ_HANDLED;
+
+			if (stat & OMAP_I2C_STAT_RDR)
+			{
+				/* Step 1: If RDR is set, clear it */
+				omap_i2c_ack_stat(dev, OMAP_I2C_STAT_RDR);
+
+				/* Step 2: */
+				if (!(omap_i2c_read_reg(dev, OMAP_I2C_STAT_REG)
+				    & OMAP_I2C_STAT_BB))
+				{
+					/* Step 3: */
+					if (omap_i2c_read_reg(dev, OMAP_I2C_STAT_REG)
+					    & OMAP_I2C_STAT_RDR)
+					{
+						omap_i2c_ack_stat(dev, OMAP_I2C_STAT_RDR);
+					}
+				}
+			}
 
 			if (dev->fifo_size) {
 				if (stat & OMAP_I2C_STAT_RRDY)

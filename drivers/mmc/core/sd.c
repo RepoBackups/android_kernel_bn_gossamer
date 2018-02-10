@@ -125,8 +125,12 @@ static int mmc_decode_csd(struct mmc_card *card)
 		 * interesting fields are unused and have fixed
 		 * values. To avoid getting tripped by buggy cards,
 		 * we assume those fixed values ourselves.
+		 *
+		 * Remove the block addressing for the card.
+		 * Rely on the OCR register to report that.
 		 */
-		mmc_card_set_blockaddr(card);
+
+		//mmc_card_set_blockaddr(card);
 
 		csd->tacc_ns	 = 0; /* Unused */
 		csd->tacc_clks	 = 0; /* Unused */
@@ -335,6 +339,7 @@ static int mmc_sd_init_card(struct mmc_host *host, u32 ocr,
 	struct mmc_card *card;
 	int err;
 	u32 cid[4];
+	u32 rocr;
 	unsigned int max_dtr;
 #ifdef CONFIG_MMC_PARANOID_SD_INIT
 	int retries;
@@ -360,7 +365,7 @@ static int mmc_sd_init_card(struct mmc_host *host, u32 ocr,
 	if (!err)
 		ocr |= 1 << 30;
 
-	err = mmc_send_app_op_cond(host, ocr, NULL);
+	err = mmc_send_app_op_cond(host, ocr, &rocr);
 	if (err)
 		goto err;
 
@@ -401,6 +406,15 @@ static int mmc_sd_init_card(struct mmc_host *host, u32 ocr,
 		}
 
 		card->type = MMC_TYPE_SD;
+
+		/*
+		 * If the OCR response to OP_COND from
+		 * the card ack block addressing then
+		 * enable it
+                 */
+		if (rocr & MMC_CARD_ACCESS_MODE_MASK)
+			card->state |= MMC_STATE_BLOCKADDR;
+
 		memcpy(card->raw_cid, cid, sizeof(card->raw_cid));
 	}
 

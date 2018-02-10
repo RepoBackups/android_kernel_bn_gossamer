@@ -7,7 +7,7 @@
  *
  * Authors:
  *	Syed Mohammed Khasim	<x0khasim@ti.com>
- *	Madhusudhan		<madhu.cr@ti.com>
+
  *	Mohit Jalori		<mjalori@ti.com>
  *
  * This file is licensed under the terms of the GNU General Public License
@@ -164,6 +164,8 @@ struct mmc_omap_host {
 	spinlock_t		clk_lock;
 	struct timer_list	inact_timer;
 	struct	omap_mmc_platform_data	*pdata;
+	int			shutdown;
+	unsigned int		card_sleep;/*emmc testing*/
 };
 
 struct omap_hsmmc_regs {
@@ -176,6 +178,8 @@ struct omap_hsmmc_regs {
 	u32 sysctl;
 };
 static struct omap_hsmmc_regs hsmmc_ctx[3];
+
+
 
 static void omap2_hsmmc_save_ctx(struct mmc_omap_host *host)
 {
@@ -494,9 +498,9 @@ omap_hsmmc_inact_timer(unsigned long data)
 /*
  * DMA clean up for command errors
  */
-static void mmc_dma_cleanup(struct mmc_omap_host *host)
+static void mmc_dma_cleanup(struct mmc_omap_host *host, int errno)
 {
-	host->data->error = -ETIMEDOUT;
+	host->data->error = errno;
 
 	if (host->use_dma && host->dma_ch != -1) {
 		dma_unmap_sg(mmc_dev(host->mmc), host->data->sg, host->dma_len,
@@ -605,7 +609,7 @@ static irqreturn_t mmc_omap_irq(int irq, void *dev_id)
 				end_cmd = 1;
 			}
 			if (host->data) {
-				mmc_dma_cleanup(host);
+				mmc_dma_cleanup(host, -ETIMEDOUT);
 				mmc_omap_reset_controller_fsm(host, SRD);
 			}
 		}
@@ -614,9 +618,9 @@ static irqreturn_t mmc_omap_irq(int irq, void *dev_id)
 			(status & DATA_DEB)) {
 			if (host->data) {
 				if (status & DATA_TIMEOUT)
-					mmc_dma_cleanup(host);
+					mmc_dma_cleanup(host, -ETIMEDOUT);
 				else
-					host->data->error = -EILSEQ;
+					mmc_dma_cleanup(host, -EILSEQ);
 				mmc_omap_reset_controller_fsm(host, SRD);
 				end_trans = 1;
 			}
@@ -637,6 +641,9 @@ static irqreturn_t mmc_omap_irq(int irq, void *dev_id)
 		mmc_omap_cmd_done(host, host->cmd);
 	if (end_trans || (status & TC))
 		mmc_omap_xfer_done(host, data);
+
+	/* Perform one dummy read to ensure the previous write actually went through */
+	status = OMAP_HSMMC_READ(host->base, STAT);
 
 	return IRQ_HANDLED;
 }
@@ -763,8 +770,11 @@ static void mmc_omap_dma_cb(int lch, u16 ch_status, void *data)
 {
 	struct mmc_omap_host *host = data;
 
-	if (ch_status & OMAP2_DMA_MISALIGNED_ERR_IRQ)
-		dev_dbg(mmc_dev(host->mmc), "MISALIGNED_ADRS_ERR\n");
+	if (!(ch_status & OMAP_DMA_BLOCK_IRQ)) {
+		dev_warn(mmc_dev(host->mmc), "unexpected dma status %x\n",
+			ch_status);
+		return;
+	}
 
 	if (host->dma_ch < 0)
 		return;
@@ -964,6 +974,10 @@ static void omap_mmc_request(struct mmc_host *mmc, struct mmc_request *req)
 
 	WARN_ON(host->mrq != NULL);
 	host->mrq = req;
+
+	if (host->shutdown) {
+		return;
+	}
 
 	if (host->inactive)
 		if (host->pdata->set_vdd1_opp)
@@ -1187,6 +1201,7 @@ static int __init omap_mmc_probe(struct platform_device *pdev)
 	host->slot_id	= 0;
 	host->mapbase	= res->start;
 	host->base	= ioremap(host->mapbase, SZ_4K);
+	host->shutdown = 0;
 
 	host->max_vdd1_opp = pdata->max_vdd1_opp;
 	host->min_vdd1_opp = pdata->min_vdd1_opp;
@@ -1232,6 +1247,7 @@ static int __init omap_mmc_probe(struct platform_device *pdev)
 	host->clks_enabled = 0;
 	host->off_counter = 0;
 	host->inactive = 0;
+	host->card_sleep = 0;
 
 	host->iclk = clk_get(&pdev->dev, "mmchs_ick");
 	if (IS_ERR(host->iclk)) {
@@ -1415,6 +1431,7 @@ static int omap_mmc_remove(struct platform_device *pdev)
 static int omap_mmc_suspend(struct platform_device *pdev, pm_message_t state)
 {
 	int ret = 0;
+	int err = 0;
 	struct mmc_omap_host *host = platform_get_drvdata(pdev);
 
 	if (host && host->suspended)
@@ -1422,6 +1439,21 @@ static int omap_mmc_suspend(struct platform_device *pdev, pm_message_t state)
 
 	if (host) {
 		host->suspended = 1;
+
+		if (host->card_sleep){
+			dev_dbg(mmc_dev(host->mmc),"has been in sleep status\n");
+		}
+		else if (mmc_card_can_sleep(host->mmc)){
+			err = mmc_card_sleep(host->mmc);
+
+			if (err){
+				dev_dbg(mmc_dev(host->mmc),"MMC sleep command CMD5 return error\n");
+			}
+			else{
+				host->card_sleep = 1;
+			}
+		}
+
 		if (host->pdata->suspend) {
 			ret = host->pdata->suspend(&pdev->dev,
 						host->slot_id);
@@ -1478,10 +1510,24 @@ static int omap_mmc_resume(struct platform_device *pdev)
 	int ret = 0;
 	struct mmc_omap_host *host = platform_get_drvdata(pdev);
 
-	if (host && !host->suspended)
+	if (host && !host->suspended){
+
+		if (host->card_sleep){/*mmc is sleeping but mmc regulator  power on*/
+
+			if (mmc_card_can_sleep(host->mmc))
+				mmc_card_awake(host->mmc);
+
+			host->card_sleep = 0;
+		}
 		return 0;
+	}
 
 	if (host) {
+
+		if (host->card_sleep){
+			host->card_sleep = 0;
+		}
+
 		if (host->pdata->resume) {
 			ret = host->pdata->resume(&pdev->dev, host->slot_id);
 			if (ret)
@@ -1503,11 +1549,26 @@ static int omap_mmc_resume(struct platform_device *pdev)
 #define omap_mmc_resume		NULL
 #endif
 
+static void omap_mmc_shutdown(struct platform_device *pdev)
+{
+	struct mmc_omap_host *host = platform_get_drvdata(pdev);
+
+	dev_info(&pdev->dev, "shutting down mmc\n");
+	mmc_flush_scheduled_work();
+	host->shutdown = 1;
+	cancel_delayed_work(&host->mmc->detect);
+	mmc_flush_scheduled_work();
+
+	msleep(1600);
+
+}	
+
 static struct platform_driver omap_mmc_driver = {
 	.probe		= omap_mmc_probe,
 	.remove		= omap_mmc_remove,
 	.suspend	= omap_mmc_suspend,
 	.resume		= omap_mmc_resume,
+	.shutdown	= omap_mmc_shutdown,
 	.driver		= {
 		.name = DRIVER_NAME,
 		.owner = THIS_MODULE,

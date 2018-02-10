@@ -64,7 +64,14 @@
 #else
 #define	EXT_PHY_RESET_GPIO_PORT1	(57)
 #endif
+// Ugly ugly hack for Encore 3G support - 
+// this should really come from the platform data
+#ifdef CONFIG_MACH_OMAP3621_EVT1A
+#define EXT_PHY_RESET_GPIO_PORT2    (23)
+#define EXT_PHY_MODEM_USB_EN        (49)
+#else
 #define	EXT_PHY_RESET_GPIO_PORT2	(61)
+#endif
 
 static int default_usb_port_startup(struct platform_device *dev, int port)
 {
@@ -112,8 +119,23 @@ static void default_usb_port_reset(struct platform_device *dev,
 		gpio_set_value(EXT_PHY_RESET_GPIO_PORT2, !reset);
 }
 
+#ifdef CONFIG_MACH_OMAP3621_EVT1A
+static void tusb_1211_reset(struct platform_device *dev,
+                            int port, int reset) {
+    if (port == 1 && 
+        reset) {
+        // Reset sequence describe in table 3-1 in TUSB1211 Design Spec.
+        gpio_set_value(EXT_PHY_RESET_GPIO_PORT2, 0);
+        udelay(200);
+        gpio_set_value(EXT_PHY_RESET_GPIO_PORT2, 1);
+    }
+}
+#endif
 
 static struct omap_usb_port_data default_usb_port_data[] = {
+#ifdef CONFIG_MACH_OMAP3621_EVT1A
+    [0] = { .flags = 0x0 }, /* disabled -- UGLY this should come from pdata */
+#else
 	[0] = {
 		.flags = OMAP_USB_PORT_FLAG_ENABLED,
 		.mode = OMAP_USB_PORT_MODE_ULPI_PHY,
@@ -122,6 +144,17 @@ static struct omap_usb_port_data default_usb_port_data[] = {
 		.shutdown = default_usb_port_shutdown,
 		.reset = default_usb_port_reset,
 	},
+#endif
+#ifdef CONFIG_MACH_OMAP3621_EVT1A
+	[1] = {
+		.flags = OMAP_USB_PORT_FLAG_ENABLED,
+		.mode = OMAP_USB_PORT_MODE_ULPI_PHY,
+		.reset_delay = 200,
+		.startup = default_usb_port_startup,
+		.shutdown = default_usb_port_shutdown,
+		.reset = tusb_1211_reset,
+	},
+#else
 	[1] = {
 		.flags = OMAP_USB_PORT_FLAG_ENABLED,
 		.mode = OMAP_USB_PORT_MODE_ULPI_PHY,
@@ -130,6 +163,7 @@ static struct omap_usb_port_data default_usb_port_data[] = {
 		.shutdown = default_usb_port_shutdown,
 		.reset = default_usb_port_reset,
 	},
+#endif
 	[2] = { .flags = 0x0, }, /* disabled */
 
 };
@@ -566,6 +600,15 @@ int enable_phy(struct platform_device *dev)
 	struct omap_usb_platform_data *data = dev->dev.platform_data;
 	int i = 0;
 
+#ifdef CONFIG_MACH_OMAP3621_EVT1A
+    if (gpio_request(EXT_PHY_MODEM_USB_EN, "ehci port 2 phy en") < 0) {
+        dev_err(&dev->dev, "failed to request GPIO %d for phy en\n", EXT_PHY_MODEM_USB_EN);
+        return -EINVAL;
+    }
+    gpio_direction_output(EXT_PHY_MODEM_USB_EN, 0);
+    gpio_set_value(EXT_PHY_MODEM_USB_EN, 1);
+#endif
+
 	for (i = 0; i < OMAP_TLL_CHANNEL_COUNT; i++) {
 		if ((data->num_ports > i) && (data->port_data[i].reset))
 			data->port_data[i].reset(dev, i, 1);
@@ -645,7 +688,7 @@ static int ehci_hcd_omap_drv_probe(struct platform_device *dev)
 		goto err;
 
 	/*Enable chip select on PHY*/
-	enable_phy(dev);
+	retval = enable_phy(dev);
 
 	return retval;
 
